@@ -1154,7 +1154,9 @@ export default function Home({ onNavigate }) {
               alt="王辰源"
               style={{
                 width: 'clamp(100px, 14vw, 160px)',
+                height: 'auto',
                 display: 'block',
+                objectFit: 'contain',
                 filter: 'drop-shadow(0 4px 16px rgba(0,0,0,0.18))',
               }}
             />
