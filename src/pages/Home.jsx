@@ -39,9 +39,9 @@ const internships = [
       '【需求调研】分析内部多个现有平台侧重点，发现硬件设备阶段性数据孤立、数据预测性能力存在短板，推动系统功能建设与AI能力接入',
       '【租户权限】根据权限释放逻辑和管理流程，设计租户、账号、项目、产品、管理员的权限管控收口，支持全美团员工、外包、三方使用',
       '【外卖柜设备画像】定义生命周期6步状态及信息数据，结合业务情况沉淀可复用组件能力，形成覆盖全生命周期的动态画像',
-      '【食安AIoT】根据视频监控数据质量与数量，定义星眸大模型支持下仓、店、服务的食品安全AI监管内容、能力指标体系与业务上报闭环',
+      '【AIoT能力】根据业务实体，沉淀仓、店、服务类型下的设备管理，构建星眸大模型支持下AI视频原子能力',
       '【Vibe Coding】基于 Claude Code、NoCode、Cursor 实现 UI 规范的代码分支，沉淀 skill，代码复用率 >85%，项目提效 35%',
-      '【成效指标】10万+设备全生命周期数据整合，全流程可视化率达 86.77%；设备故障响应处理效率提升 70%；食品安全准召率高于 97%',
+      '【成效指标】10万+设备全生命周期数据整合，全流程可视化率达 86.77%；设备故障响应处理效率提升 70%',
     ],
   },
   {
@@ -1122,9 +1122,10 @@ export default function Home({ onNavigate }) {
 
         {/* ── Hero ── */}
         <div style={{ marginBottom: 48, animation: 'fadeUp 0.4s ease both' }}>
-          <h1 style={{ fontSize: 'clamp(38px,6vw,68px)', fontWeight: 900, lineHeight: 1.08, letterSpacing: '-0.02em', marginBottom: 16, color: '#1A1A1A' }}>
-            王辰源
-            <br />
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 24, marginBottom: 16 }}>
+            <h1 style={{ fontSize: 'clamp(38px,6vw,68px)', fontWeight: 900, lineHeight: 1.08, letterSpacing: '-0.02em', color: '#1A1A1A', margin: 0 }}>
+              王辰源
+              <br />
             <span style={{
               background: 'linear-gradient(90deg,#FF3B2F,#FF8C00,#FFD600,#2ECC71,#00BFFF,#B44DFF)',
               WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
@@ -1133,6 +1134,33 @@ export default function Home({ onNavigate }) {
               fontSize: '0.72em',
             }}>Product Manager</span>
           </h1>
+
+          {/* 弹性间隔，把照片推到右侧 */}
+          <div style={{ flex: 1 }} />
+
+          {/* 拍立得头像 */}
+          <div style={{
+            flexShrink: 0,
+            marginTop: 4,
+            transform: 'rotate(3deg)',
+            transition: 'transform 0.3s ease',
+            cursor: 'default',
+          }}
+            onMouseEnter={e => e.currentTarget.style.transform = 'rotate(0deg) scale(1.04)'}
+            onMouseLeave={e => e.currentTarget.style.transform = 'rotate(3deg)'}
+          >
+            <img
+              src="/avatar.png"
+              alt="王辰源"
+              style={{
+                width: 'clamp(100px, 14vw, 160px)',
+                display: 'block',
+                filter: 'drop-shadow(0 4px 16px rgba(0,0,0,0.18))',
+              }}
+            />
+          </div>
+          </div>{/* end flex row */}
+
           <p style={{ fontSize: 15, lineHeight: 1.9, color: 'rgba(26,26,26,0.55)', maxWidth: 520, marginBottom: 20 }}>
             热爱把复杂的东西变简单，在体验中发现惊喜。<br />关注 AIoT 与 AI 产品，喜欢从用户视角出发解决真实问题。
           </p>
