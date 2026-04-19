@@ -839,43 +839,6 @@ body::before{
   z-index:10;
   overflow:hidden;
 }
-/* 手机端：App 内容全屏，去掉样机外壳 */
-@media(max-width:480px){
-  .app-preview-page{
-    background:#faf9f7;
-    overflow:hidden;
-  }
-  .app-phone-wrap{
-    padding:0 !important;
-    align-items:stretch !important;
-  }
-  #phoneWrapper{
-    width:100% !important;
-    height:100% !important;
-    transform:none !important;
-    border-radius:0 !important;
-    box-shadow:none !important;
-  }
-  #phoneWrapper .phone{
-    width:100% !important;
-    height:100% !important;
-    border-radius:0 !important;
-    box-shadow:none !important;
-    padding:0 !important;
-    background:#faf9f7 !important;
-  }
-  #phoneWrapper .phone::before,
-  #phoneWrapper .phone::after{
-    display:none !important;
-  }
-  #mainScreen{
-    border-radius:0 !important;
-    width:100% !important;
-    height:100% !important;
-    overflow-y:auto !important;
-    -webkit-overflow-scrolling:touch !important;
-  }
-}
 .app-preview-topbar{
   width:100%;max-width:480px;
   display:flex;align-items:center;justify-content:space-between;
