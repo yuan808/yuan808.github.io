@@ -656,6 +656,8 @@ body::before{
 .typing-dot span:nth-child(2){animation-delay:.2s;}
 .typing-dot span:nth-child(3){animation-delay:.4s;}
 @keyframes blink{0%,80%,100%{opacity:.2;}40%{opacity:1;}}
+.typing-cursor{display:inline;animation:cursorBlink 1s step-end infinite;color:#888;font-weight:300;}
+@keyframes cursorBlink{0%,100%{opacity:1;}50%{opacity:0;}}
 /* 快捷选项区 */
 .quick-chips{padding:8px 12px 6px;display:flex;gap:7px;overflow-x:auto;flex-shrink:0;}
 .quick-chips::-webkit-scrollbar{display:none;}
@@ -3509,26 +3511,37 @@ function sendMessage(role, text) {
           if (bubble) bubble.innerHTML = ''; // 清空 typing 动画
         }
         streamText += data.content;
-        // 逐字渲染（处理 JSON 格式的文本，只显示纯文本部分）
+        // 逐字渲染：AI 返回 JSON 时，实时提取可读内容展示
         if (bubble) {
-          var displayText = streamText;
-          // 如果看起来是 JSON 开头，尝试提取可读部分
-          if (displayText.trim().startsWith('{')) {
-            // 正在生成 JSON，显示一个友好提示 + 已有文本
-            var textMatch = displayText.match(/"text"\s*:\s*"((?:[^"\\]|\\.)*)(?:"|$)/);
-            var bodyMatch = displayText.match(/"body"\s*:\s*"((?:[^"\\]|\\.)*)(?:"|$)/);
-            var titleMatch = displayText.match(/"title"\s*:\s*"((?:[^"\\]|\\.)*)(?:"|$)/);
-            var parts = [];
-            if (textMatch && textMatch[1]) parts.push(textMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"'));
-            if (titleMatch && titleMatch[1]) parts.push('📝 ' + titleMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"'));
-            if (bodyMatch && bodyMatch[1]) parts.push(bodyMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"'));
-            if (parts.length) {
-              bubble.innerHTML = parts.join('<br><br>').replace(/\n/g, '<br>');
+          var raw = streamText.trim();
+          if (raw.startsWith('{')) {
+            // 正在生成 JSON，智能提取各字段内容展示
+            var _unescape = function(s) { return s.replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\'); };
+            var textMatch = raw.match(/"text"\s*:\s*"((?:[^"\\]|\\.)*)/); 
+            var titleMatch = raw.match(/"title"\s*:\s*"((?:[^"\\]|\\.)*)/); 
+            var bodyMatch = raw.match(/"body"\s*:\s*"((?:[^"\\]|\\.)*)/); 
+            var display = '';
+            // 优先展示 text（AI 的分析/对话文字）
+            if (textMatch && textMatch[1]) {
+              display += _unescape(textMatch[1]);
+            }
+            // 如果有 title，展示标题预览
+            if (titleMatch && titleMatch[1]) {
+              if (display) display += '\n\n';
+              display += '📝 ' + _unescape(titleMatch[1]);
+            }
+            // 如果有 body，展示正文预览
+            if (bodyMatch && bodyMatch[1]) {
+              if (display) display += '\n\n';
+              display += _unescape(bodyMatch[1]);
+            }
+            if (display) {
+              bubble.innerHTML = '<div style="line-height:1.6;">' + display.replace(/\n/g, '<br>') + '<span class="typing-cursor">▍</span></div>';
             } else {
               bubble.innerHTML = '<span style="color:#888;">✍️ AI 正在创作中…</span>';
             }
           } else {
-            bubble.innerHTML = displayText.replace(/\n/g, '<br>');
+            bubble.innerHTML = '<div style="line-height:1.6;">' + raw.replace(/\n/g, '<br>') + '<span class="typing-cursor">▍</span></div>';
           }
           if (area) area.scrollTop = area.scrollHeight;
         }
@@ -3593,25 +3606,33 @@ function sendMessage(role, text) {
 // 解析流式完成后的全文
 function _parseStreamResult(fullText) {
   var notePreview = null;
-  // 尝试解析 JSON
+
+  // 方法1：整体是 JSON
   try {
     var data = JSON.parse(fullText);
-    if (data && data.note && (data.note.title || data.note.body)) {
-      notePreview = {
-        title: data.note.title || '',
-        body: data.note.body || '',
-        tags: Array.isArray(data.note.tags) ? data.note.tags : [],
-      };
-      return { from: 'agent', text: data.text || '', notePreview: notePreview };
+    if (data && typeof data === 'object') {
+      // 有有效的 note 对象
+      if (data.note && typeof data.note === 'object' && (data.note.title || data.note.body)) {
+        notePreview = {
+          title: data.note.title || '',
+          body: data.note.body || '',
+          tags: Array.isArray(data.note.tags) ? data.note.tags : [],
+        };
+        return { from: 'agent', text: data.text || '', notePreview: notePreview };
+      }
+      // note 为 null 或空 → 提取 text 作为纯文本
+      if (data.text) {
+        return { from: 'agent', text: data.text, notePreview: null };
+      }
     }
   } catch(e) {}
 
-  // 尝试从 markdown code block 提取 JSON
+  // 方法2：从 ```json``` 块中提取
   var jsonMatch = fullText.match(/```json\s*\n?([\s\S]*?)\n?```/);
   if (jsonMatch) {
     try {
       var data2 = JSON.parse(jsonMatch[1]);
-      if (data2 && data2.note) {
+      if (data2 && data2.note && typeof data2.note === 'object' && (data2.note.title || data2.note.body)) {
         notePreview = {
           title: data2.note.title || '',
           body: data2.note.body || '',
@@ -3620,15 +3641,18 @@ function _parseStreamResult(fullText) {
         var cleanText = fullText.slice(0, jsonMatch.index).trim();
         return { from: 'agent', text: cleanText || data2.text || '', notePreview: notePreview };
       }
+      if (data2 && data2.text) {
+        return { from: 'agent', text: data2.text, notePreview: null };
+      }
     } catch(e2) {}
   }
 
-  // 尝试从文本中找 JSON 块
+  // 方法3：从文本中找 {"note": {...}} 模式
   var jsonMatch2 = fullText.match(/\{[\s\S]*?"note"\s*:\s*\{[\s\S]*?\}\s*\}/);
   if (jsonMatch2) {
     try {
       var data3 = JSON.parse(jsonMatch2[0]);
-      if (data3.note) {
+      if (data3.note && (data3.note.title || data3.note.body)) {
         notePreview = {
           title: data3.note.title || '',
           body: data3.note.body || '',
@@ -3639,6 +3663,14 @@ function _parseStreamResult(fullText) {
       }
     } catch(e3) {}
   }
+
+  // 方法4：整体 JSON 但 note 为 null 的兜底
+  try {
+    var data4 = JSON.parse(fullText);
+    if (data4 && data4.text) {
+      return { from: 'agent', text: data4.text, notePreview: null };
+    }
+  } catch(e4) {}
 
   return { from: 'agent', text: fullText, notePreview: null };
 }
