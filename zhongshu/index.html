@@ -2257,6 +2257,8 @@ function renderNotePreview(note, color) {
 
   // 正文去掉 #标签行
   var bodyClean = note.body.replace(/#[\u4e00-\u9fa5\w]+/g, '').replace(/\n+$/, '').trim();
+  // 智能分段
+  var bodyParas = smartSplitParas(bodyClean);
 
   // 初始渲染直接用 mock 占位图
   var slidesHtml = Array(imgCount).fill(0).map(function(){ return _makeMockSlide(); }).join('');
@@ -2325,7 +2327,7 @@ function renderNotePreview(note, color) {
     +'<span style="font-size:11px;color:#999;">可局部修改这一段</span>'
     +'</div>'
     +'<div id="'+pid+'-body-paras">'
-    + bodyClean.split(/\n\n+/).map(function(para, pi) {
+    + bodyParas.map(function(para, pi) {
         var paraId = pid+'-para-'+pi;
         return '<div class="xhs-para" id="'+paraId+'" onclick="xhsParaClick(\''+pid+'\','+pi+',event)">'
           + '<div class="xhs-para-text" id="'+paraId+'-text">'+para.replace(/\n/g,'<br>')+'</div>'
@@ -2590,12 +2592,18 @@ function xhsParaAct(pid, pi, act, e) {
   fetch(window.ZHONGSHU_API_BASE + '/api/rewrite', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text: text, action: act })
+    body: JSON.stringify({ action: 'rewrite_body', body: text, instruction: act })
   }).then(function(r) {
     if (!r.ok) throw new Error('rewrite http ' + r.status);
     return r.json();
   }).then(function(j) {
-    var newText = (j && j.text) ? j.text.trim() : '';
+    // 后端返回 {text, note}，优先用 note.body，其次用 text
+    var newText = '';
+    if (j && j.note && j.note.body) {
+      newText = j.note.body.trim();
+    } else if (j && j.text) {
+      newText = j.text.trim();
+    }
     if (newText) {
       textEl.innerHTML = newText.replace(/\n/g,'<br>');
     }
@@ -2903,17 +2911,55 @@ function xhsSelectionRewrite(pid, field, selText, act) {
   el.innerHTML = newText.replace(/\n/g, '<br>');
   showToast('✅ 已' + act);
 }
+// 智能分段：优先按双换行，不够再按单换行
+function smartSplitParas(text) {
+  var paras = text.split(/\n\n+/).filter(function(p){ return p.trim(); });
+  if (paras.length <= 1 && text.indexOf('\n') !== -1) {
+    paras = text.split(/\n/).filter(function(p){ return p.trim(); });
+  }
+  return paras;
+}
+
 function xhsRewrite(pid, field, action) {
   showToast('AI 正在' + action + '...');
-  setTimeout(function(){
-    var samples = (REWRITE_SAMPLES[field] || {})[action] || [];
-    if (!samples.length) return;
-    var newText = samples[Math.floor(Math.random()*samples.length)];
+
+  // 获取当前内容
+  var currentTitle = '';
+  var currentBody = '';
+  var titleEl = document.getElementById(pid+'-title');
+  var bodyEl = document.getElementById(pid+'-body');
+  if (titleEl) currentTitle = titleEl.innerText || titleEl.textContent || '';
+  if (bodyEl) currentBody = bodyEl.innerText || bodyEl.textContent || '';
+
+  // 映射前端 action 到后端 action
+  var apiAction = field === 'title' ? 'rewrite_title' : 'rewrite_body';
+
+  fetch(window.ZHONGSHU_API_BASE + '/api/rewrite', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: apiAction,
+      title: currentTitle,
+      body: currentBody,
+      tags: [],
+      instruction: action
+    })
+  }).then(function(r) {
+    if (!r.ok) throw new Error('rewrite http ' + r.status);
+    return r.json();
+  }).then(function(j) {
+    var newText = '';
+    if (j && j.note) {
+      newText = field === 'title' ? (j.note.title || '') : (j.note.body || '');
+    }
+    if (!newText && j && j.text) newText = j.text;
+    if (!newText) { showToast('⚠️ AI 未返回有效内容'); return; }
+
     if (field === 'body') {
       // 整体改写：重新渲染段落列表
       var parasEl = document.getElementById(pid+'-body-paras');
       if (!parasEl) return;
-      parasEl.innerHTML = newText.split(/\n\n+/).map(function(para, pi) {
+      parasEl.innerHTML = smartSplitParas(newText).map(function(para, pi) {
         var paraId = pid+'-para-'+pi;
         return '<div class="xhs-para" id="'+paraId+'" onclick="xhsParaClick(\''+pid+'\','+pi+',event)">'
           + '<div class="xhs-para-text" id="'+paraId+'-text">'+para.replace(/\n/g,'<br>')+'</div>'
@@ -2931,7 +2977,36 @@ function xhsRewrite(pid, field, action) {
       if (el) el.innerHTML = newText.replace(/\n/g,'<br>');
     }
     showToast('✅ 已' + action);
-  }, 800);
+  }).catch(function(err) {
+    console.error('xhsRewrite error:', err);
+    // 降级：用本地样本
+    var samples = (REWRITE_SAMPLES[field] || {})[action] || [];
+    if (samples.length) {
+      var fallbackText = samples[Math.floor(Math.random()*samples.length)];
+      if (field === 'body') {
+        var parasEl = document.getElementById(pid+'-body-paras');
+        if (parasEl) {
+          parasEl.innerHTML = smartSplitParas(fallbackText).map(function(para, pi) {
+            var paraId = pid+'-para-'+pi;
+            return '<div class="xhs-para" id="'+paraId+'" onclick="xhsParaClick(\''+pid+'\','+pi+',event)">'
+              + '<div class="xhs-para-text" id="'+paraId+'-text">'+para.replace(/\n/g,'<br>')+'</div>'
+              + '<div class="xhs-para-actions" id="'+paraId+'-actions">'
+              + '<button class="xhs-para-btn" onclick="xhsParaAct(\''+pid+'\','+pi+',\'换个说法\',event)">💬 换个说法</button>'
+              + '<button class="xhs-para-btn" onclick="xhsParaAct(\''+pid+'\','+pi+',\'更口语\',event)">🎙 更口语</button>'
+              + '<button class="xhs-para-btn" onclick="xhsParaAct(\''+pid+'\','+pi+',\'更有力\',event)">💪 更有力</button>'
+              + '<button class="xhs-para-btn" onclick="xhsParaAct(\''+pid+'\','+pi+',\'加emoji\',event)">😊 加emoji</button>'
+              + '<button class="xhs-para-btn danger" onclick="xhsParaAct(\''+pid+'\','+pi+',\'删掉\',event)">🗑 删掉</button>'
+              + '</div>'
+              + '</div>';
+          }).join('');
+        }
+      } else {
+        var el = document.getElementById(pid+'-'+field);
+        if (el) el.innerHTML = fallbackText.replace(/\n/g,'<br>');
+      }
+    }
+    showToast('✅ 已' + action + '（本地）');
+  });
 }
 
 // 手动编辑（inline 变成 textarea）
@@ -3253,7 +3328,7 @@ function autoResize(el) {
 }
 
 // ===== 真实后端对接 =====
-window.ZHONGSHU_API_BASE = 'https://web-production-88dd2.up.railway.app';
+window.ZHONGSHU_API_BASE = 'https://zhongshu-agent.onrender.com';
 (function(){
   try {
     var m = location.search.match(/[?&]api=([^&]+)/);
