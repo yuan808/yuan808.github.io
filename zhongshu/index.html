@@ -3466,8 +3466,7 @@ function sendMessage(role, text) {
       var streamRow = document.createElement('div');
       streamRow.className = 'msg-row';
       streamRow.id = streamId;
-      streamRow.style.alignItems = 'flex-start';
-      streamRow.innerHTML = '<div class="msg-avatar" style="background:'+cfg.light+';margin-top:10px;">🌱</div>'
+      streamRow.innerHTML = '<div class="msg-avatar" style="background:'+cfg.light+';">🌱</div>'
         +'<div class="msg-bubble agent" id="'+streamId+'-bubble" style="min-height:32px;">'
         +'<div class="typing-dot"><span></span><span></span><span></span></div>'
         +'</div>';
