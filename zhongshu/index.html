@@ -3387,7 +3387,65 @@ function zhongshuChat(role, text, _retried) {
   });
 }
 
-// 核心：发送消息 + AI 回复（真实后端优先，降级到 mock）
+// ===== 流式 SSE 对话 =====
+function zhongshuChatStream(role, text, callbacks, _retried) {
+  // callbacks: { onToolStart, onToolDone, onDelta, onDone, onError }
+  return zhongshuEnsureSession(role).then(function(sid){
+    return fetch(window.ZHONGSHU_API_BASE + '/api/chat/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sid, role: role, message: text })
+    }).then(function(response){
+      if (response.status === 404 && !_retried) {
+        delete ZHONGSHU_SESSIONS[role];
+        return zhongshuChatStream(role, text, callbacks, true);
+      }
+      if (!response.ok) {
+        return response.text().then(function(t){ throw new Error('stream http ' + response.status + ' ' + t); });
+      }
+      // 读取 SSE 流
+      var reader = response.body.getReader();
+      var decoder = new TextDecoder();
+      var buffer = '';
+
+      function processChunk() {
+        return reader.read().then(function(result) {
+          if (result.done) return;
+          buffer += decoder.decode(result.value, { stream: true });
+
+          // 按双换行分割 SSE 事件
+          var parts = buffer.split('\n\n');
+          buffer = parts.pop(); // 最后一部分可能不完整
+
+          parts.forEach(function(part) {
+            if (!part.trim()) return;
+            var eventType = 'message';
+            var dataStr = '';
+            part.split('\n').forEach(function(line) {
+              if (line.startsWith('event: ')) eventType = line.slice(7).trim();
+              else if (line.startsWith('data: ')) dataStr = line.slice(6);
+            });
+            if (!dataStr) return;
+
+            try {
+              var data = JSON.parse(dataStr);
+              if (eventType === 'tool_start' && callbacks.onToolStart) callbacks.onToolStart(data);
+              else if (eventType === 'tool_done' && callbacks.onToolDone) callbacks.onToolDone(data);
+              else if (eventType === 'delta' && callbacks.onDelta) callbacks.onDelta(data);
+              else if (eventType === 'done' && callbacks.onDone) callbacks.onDone(data);
+              else if (eventType === 'error' && callbacks.onError) callbacks.onError(data);
+            } catch(e) { console.warn('[SSE parse]', e, dataStr); }
+          });
+
+          return processChunk();
+        });
+      }
+      return processChunk();
+    });
+  });
+}
+
+// 核心：发送消息 + AI 回复（真实后端 SSE 优先，降级到 mock）
 function sendMessage(role, text) {
   var cfg = ROLE_CONFIG[role];
   if (!chatHistory[role]) chatHistory[role] = [];
@@ -3396,39 +3454,193 @@ function sendMessage(role, text) {
   chatHistory[role].push({ from: 'user', text: text });
   refreshChat(role);
 
-  // 加入打字中占位
-  var typingId = 'typing-' + Date.now();
   var area = document.getElementById('chatArea-'+role);
-  if (area) {
-    var typingEl = document.createElement('div');
-    typingEl.className = 'msg-row';
-    typingEl.id = typingId;
-    typingEl.innerHTML = '<div class="msg-avatar" style="background:'+cfg.light+';">🌱</div>'
-      +'<div class="msg-bubble agent"><div class="typing-dot"><span></span><span></span><span></span></div></div>';
-    area.appendChild(typingEl);
-    area.scrollTop = area.scrollHeight;
-  }
-
-  function finish(reply) {
-    var typing = document.getElementById(typingId);
-    if (typing) typing.remove();
-    chatHistory[role].push(reply);
-    refreshChat(role);
-  }
 
   if (zhongshuHasRealBackend()) {
-    zhongshuChat(role, text).then(finish).catch(function(err){
-      console.warn('[种薯] 后端调用失败，降级到 mock:', err);
-      finish({ from:'agent', text:'（连不上后端：' + (err && err.message || err) + '，先用本地 demo 回你）' });
-      setTimeout(function(){
-        chatHistory[role].push(mockAgentReply(role, text));
+    // ── 流式模式 ──
+    // 创建流式消息容器
+    var streamId = 'stream-' + Date.now();
+    if (area) {
+      var streamRow = document.createElement('div');
+      streamRow.className = 'msg-row';
+      streamRow.id = streamId;
+      streamRow.style.alignItems = 'flex-start';
+      streamRow.innerHTML = '<div class="msg-avatar" style="background:'+cfg.light+';margin-top:10px;">🌱</div>'
+        +'<div class="msg-bubble agent" id="'+streamId+'-bubble" style="min-height:32px;">'
+        +'<div class="typing-dot"><span></span><span></span><span></span></div>'
+        +'</div>';
+      area.appendChild(streamRow);
+      area.scrollTop = area.scrollHeight;
+    }
+
+    var bubble = document.getElementById(streamId+'-bubble');
+    var streamText = '';
+    var typingStarted = false;
+
+    zhongshuChatStream(role, text, {
+      onToolStart: function(data) {
+        // 显示工具调用进度
+        if (bubble) {
+          var toolName = data.name === 'fetch_product_info' ? '🔍 正在抓取商品信息…'
+            : data.name === 'search_trending_tags' ? '🏷️ 正在搜索热门标签…'
+            : '🔧 正在调用 ' + data.name + '…';
+          bubble.innerHTML = '<div style="color:#888;font-size:12px;display:flex;align-items:center;gap:6px;">'
+            +'<div class="typing-dot" style="display:inline-flex;"><span></span><span></span><span></span></div>'
+            + toolName
+            +'</div>';
+          if (area) area.scrollTop = area.scrollHeight;
+        }
+      },
+      onToolDone: function(data) {
+        if (bubble) {
+          var doneText = data.name === 'fetch_product_info' ? '✅ 商品信息已获取'
+            : data.name === 'search_trending_tags' ? '✅ 热门标签已搜索'
+            : '✅ ' + data.name + ' 完成';
+          bubble.innerHTML = '<div style="color:#888;font-size:12px;">'
+            + doneText + '，正在生成文案…'
+            +'<div class="typing-dot" style="display:inline-flex;margin-left:6px;"><span></span><span></span><span></span></div>'
+            +'</div>';
+          if (area) area.scrollTop = area.scrollHeight;
+        }
+      },
+      onDelta: function(data) {
+        if (!typingStarted) {
+          typingStarted = true;
+          if (bubble) bubble.innerHTML = ''; // 清空 typing 动画
+        }
+        streamText += data.content;
+        // 逐字渲染（处理 JSON 格式的文本，只显示纯文本部分）
+        if (bubble) {
+          var displayText = streamText;
+          // 如果看起来是 JSON 开头，尝试提取可读部分
+          if (displayText.trim().startsWith('{')) {
+            // 正在生成 JSON，显示一个友好提示 + 已有文本
+            var textMatch = displayText.match(/"text"\s*:\s*"((?:[^"\\]|\\.)*)(?:"|$)/);
+            var bodyMatch = displayText.match(/"body"\s*:\s*"((?:[^"\\]|\\.)*)(?:"|$)/);
+            var titleMatch = displayText.match(/"title"\s*:\s*"((?:[^"\\]|\\.)*)(?:"|$)/);
+            var parts = [];
+            if (textMatch && textMatch[1]) parts.push(textMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"'));
+            if (titleMatch && titleMatch[1]) parts.push('📝 ' + titleMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"'));
+            if (bodyMatch && bodyMatch[1]) parts.push(bodyMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"'));
+            if (parts.length) {
+              bubble.innerHTML = parts.join('<br><br>').replace(/\n/g, '<br>');
+            } else {
+              bubble.innerHTML = '<span style="color:#888;">✍️ AI 正在创作中…</span>';
+            }
+          } else {
+            bubble.innerHTML = displayText.replace(/\n/g, '<br>');
+          }
+          if (area) area.scrollTop = area.scrollHeight;
+        }
+      },
+      onDone: function(data) {
+        var fullText = data.full_text || streamText;
+        // 移除流式容器
+        var streamEl = document.getElementById(streamId);
+        if (streamEl) streamEl.remove();
+
+        // 解析 AI 响应（可能含笔记 JSON）
+        var reply = _parseStreamResult(fullText);
+        chatHistory[role].push(reply);
         refreshChat(role);
-      }, 200);
+      },
+      onError: function(data) {
+        if (bubble) {
+          bubble.innerHTML = '<span style="color:#e74c3c;">⚠️ ' + (data.message || '出了点问题') + '</span>';
+        }
+        // 降级到 mock
+        setTimeout(function(){
+          var streamEl = document.getElementById(streamId);
+          if (streamEl) streamEl.remove();
+          chatHistory[role].push(mockAgentReply(role, text));
+          refreshChat(role);
+        }, 1500);
+      }
+    }).catch(function(err){
+      console.warn('[种薯] 流式调用失败，降级到非流式:', err);
+      var streamEl = document.getElementById(streamId);
+      if (streamEl) streamEl.remove();
+      // 降级到非流式
+      zhongshuChat(role, text).then(function(reply){
+        chatHistory[role].push(reply);
+        refreshChat(role);
+      }).catch(function(err2){
+        chatHistory[role].push({ from:'agent', text:'（连不上后端：' + (err2 && err2.message || err2) + '）' });
+        refreshChat(role);
+      });
     });
   } else {
-    // mock 延迟回复
-    setTimeout(function(){ finish(mockAgentReply(role, text)); }, 1400);
+    // ── 非流式 mock ──
+    var typingId = 'typing-' + Date.now();
+    if (area) {
+      var typingEl = document.createElement('div');
+      typingEl.className = 'msg-row';
+      typingEl.id = typingId;
+      typingEl.innerHTML = '<div class="msg-avatar" style="background:'+cfg.light+';">🌱</div>'
+        +'<div class="msg-bubble agent"><div class="typing-dot"><span></span><span></span><span></span></div></div>';
+      area.appendChild(typingEl);
+      area.scrollTop = area.scrollHeight;
+    }
+    setTimeout(function(){
+      var typing = document.getElementById(typingId);
+      if (typing) typing.remove();
+      chatHistory[role].push(mockAgentReply(role, text));
+      refreshChat(role);
+    }, 1400);
   }
+}
+
+// 解析流式完成后的全文
+function _parseStreamResult(fullText) {
+  var notePreview = null;
+  // 尝试解析 JSON
+  try {
+    var data = JSON.parse(fullText);
+    if (data && data.note && (data.note.title || data.note.body)) {
+      notePreview = {
+        title: data.note.title || '',
+        body: data.note.body || '',
+        tags: Array.isArray(data.note.tags) ? data.note.tags : [],
+      };
+      return { from: 'agent', text: data.text || '', notePreview: notePreview };
+    }
+  } catch(e) {}
+
+  // 尝试从 markdown code block 提取 JSON
+  var jsonMatch = fullText.match(/```json\s*\n?([\s\S]*?)\n?```/);
+  if (jsonMatch) {
+    try {
+      var data2 = JSON.parse(jsonMatch[1]);
+      if (data2 && data2.note) {
+        notePreview = {
+          title: data2.note.title || '',
+          body: data2.note.body || '',
+          tags: Array.isArray(data2.note.tags) ? data2.note.tags : [],
+        };
+        var cleanText = fullText.slice(0, jsonMatch.index).trim();
+        return { from: 'agent', text: cleanText || data2.text || '', notePreview: notePreview };
+      }
+    } catch(e2) {}
+  }
+
+  // 尝试从文本中找 JSON 块
+  var jsonMatch2 = fullText.match(/\{[\s\S]*?"note"\s*:\s*\{[\s\S]*?\}\s*\}/);
+  if (jsonMatch2) {
+    try {
+      var data3 = JSON.parse(jsonMatch2[0]);
+      if (data3.note) {
+        notePreview = {
+          title: data3.note.title || '',
+          body: data3.note.body || '',
+          tags: Array.isArray(data3.note.tags) ? data3.note.tags : [],
+        };
+        var cleanText2 = fullText.slice(0, jsonMatch2.index).trim();
+        return { from: 'agent', text: cleanText2 || data3.text || '', notePreview: notePreview };
+      }
+    } catch(e3) {}
+  }
+
+  return { from: 'agent', text: fullText, notePreview: null };
 }
 
 // mock AI 回复逻辑（核心流程：收到链接/图片 → 自动分析 → 直接出文案）
