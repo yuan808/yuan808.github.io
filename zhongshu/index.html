@@ -3425,7 +3425,8 @@ function zhongshuChatStream(role, text, callbacks, _retried) {
             var dataStr = '';
             part.split('\n').forEach(function(line) {
               if (line.startsWith('event: ')) eventType = line.slice(7).trim();
-              else if (line.startsWith('data: ')) dataStr = line.slice(6);
+              else if (line.startsWith('data: ')) dataStr += line.slice(6);
+              else if (dataStr && line) dataStr += line; // data 续行
             });
             if (!dataStr) return;
 
@@ -3547,12 +3548,25 @@ function sendMessage(role, text) {
       },
       onDone: function(data) {
         var fullText = data.full_text || streamText;
+        console.log('[种薯 onDone] full_text length:', fullText.length, 'streamText length:', streamText.length);
+
+        // 解析 AI 响应（可能含笔记 JSON）
+        var reply = _parseStreamResult(fullText);
+        console.log('[种薯 onDone] parsed reply:', reply.notePreview ? 'HAS NOTE' : 'NO NOTE', 'text:', reply.text.substring(0, 50));
+
+        // 如果 full_text 解析没拿到笔记，用 streamText 再试一次
+        if (!reply.notePreview && streamText && streamText !== fullText) {
+          var retry = _parseStreamResult(streamText);
+          if (retry.notePreview) {
+            console.log('[种薯 onDone] streamText retry got note!');
+            reply = retry;
+          }
+        }
+
         // 移除流式容器
         var streamEl = document.getElementById(streamId);
         if (streamEl) streamEl.remove();
 
-        // 解析 AI 响应（可能含笔记 JSON）
-        var reply = _parseStreamResult(fullText);
         chatHistory[role].push(reply);
         refreshChat(role);
       },
