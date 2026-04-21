@@ -2597,7 +2597,7 @@ function xhsParaAct(pid, pi, act, e) {
   fetch(window.ZHONGSHU_API_BASE + '/api/rewrite', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'rewrite_body', body: text, instruction: act })
+    body: JSON.stringify({ action: 'rewrite_sentence', body: text, instruction: act })
   }).then(function(r) {
     if (!r.ok) throw new Error('rewrite http ' + r.status);
     return r.json();
@@ -2610,7 +2610,9 @@ function xhsParaAct(pid, pi, act, e) {
       newText = j.text.trim();
     }
     if (newText) {
-      textEl.innerHTML = newText.replace(/\n/g,'<br>');
+      // 单句改写：只取第一句，防止AI扩写成多句
+      var firstLine = newText.split(/\n/)[0].trim();
+      textEl.innerHTML = firstLine;
     }
     textEl.style.opacity = '';
     showToast('✅ 已' + act);
