@@ -3460,9 +3460,10 @@ function sendMessage(role, text) {
   var area = document.getElementById('chatArea-'+role);
 
   if (zhongshuHasRealBackend()) {
-    // ── 流式模式 ──
-    // 创建流式消息容器
+    // ── 流式模式：先出卡片骨架，逐字填入 ──
     var streamId = 'stream-' + Date.now();
+    var liveCardId = 'live-card-' + Date.now();
+    // 先放一个 loading 气泡
     if (area) {
       var streamRow = document.createElement('div');
       streamRow.className = 'msg-row';
@@ -3477,67 +3478,99 @@ function sendMessage(role, text) {
 
     var bubble = document.getElementById(streamId+'-bubble');
     var streamText = '';
-    var typingStarted = false;
+    var cardShown = false;
+    var _ue = function(s) { return s.replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\'); };
+
+    // 构建空卡片骨架 HTML
+    function _buildLiveCard() {
+      var slidesHtml = Array(3).fill(0).map(function(){ return _makeMockSlide(); }).join('');
+      return '<div class="xhs-preview" id="'+liveCardId+'" style="margin:0;">'
+        +'<div class="xhs-draft-badge">草稿</div>'
+        +'<div class="xhs-slides"><div class="xhs-slides-track">'+slidesHtml+'</div></div>'
+        +'<div class="xhs-content">'
+        +'<div class="xhs-author">'
+        +'<div class="xhs-avatar" style="background:'+cfg.color+'20;">'+cfg.icon+'</div>'
+        +'<div class="xhs-name" style="flex:1;">'+cfg.label+'</div>'
+        +'<span style="font-size:11px;color:#ff9500;font-weight:600;background:#fff8ee;padding:3px 8px;border-radius:8px;">生成中…</span>'
+        +'</div>'
+        +'<div class="xhs-title" id="'+liveCardId+'-title" style="min-height:24px;"><span class="typing-cursor">▍</span></div>'
+        +'<div id="'+liveCardId+'-body" style="min-height:40px;padding:0 14px 8px;font-size:14px;line-height:1.8;color:#333;"></div>'
+        +'<div id="'+liveCardId+'-tags" style="padding:4px 14px 12px;"></div>'
+        +'</div></div>';
+    }
 
     zhongshuChatStream(role, text, {
       onToolStart: function(data) {
-        // 显示工具调用进度
-        if (bubble) {
+        if (bubble && !cardShown) {
           var toolName = data.name === 'fetch_product_info' ? '🔍 正在抓取商品信息…'
             : data.name === 'search_trending_tags' ? '🏷️ 正在搜索热门标签…'
             : '🔧 正在调用 ' + data.name + '…';
           bubble.innerHTML = '<div style="color:#888;font-size:12px;display:flex;align-items:center;gap:6px;">'
             +'<div class="typing-dot" style="display:inline-flex;"><span></span><span></span><span></span></div>'
-            + toolName
-            +'</div>';
+            + toolName +'</div>';
           if (area) area.scrollTop = area.scrollHeight;
         }
       },
       onToolDone: function(data) {
-        if (bubble) {
-          var doneText = data.name === 'fetch_product_info' ? '✅ 商品信息已获取'
-            : data.name === 'search_trending_tags' ? '✅ 热门标签已搜索'
-            : '✅ ' + data.name + ' 完成';
-          bubble.innerHTML = '<div style="color:#888;font-size:12px;">'
-            + doneText + '，正在生成文案…'
-            +'<div class="typing-dot" style="display:inline-flex;margin-left:6px;"><span></span><span></span><span></span></div>'
-            +'</div>';
+        if (bubble && !cardShown) {
+          bubble.innerHTML = '<div style="color:#888;font-size:12px;display:flex;align-items:center;gap:6px;">'
+            +'<div class="typing-dot" style="display:inline-flex;"><span></span><span></span><span></span></div>'
+            +'✍️ 正在生成笔记草稿…</div>';
           if (area) area.scrollTop = area.scrollHeight;
         }
       },
       onDelta: function(data) {
         streamText += data.content;
-        // 不显示中间文字，只显示创作动画，等 done 时直接出卡片
-        if (bubble && !typingStarted) {
-          typingStarted = true;
-          bubble.innerHTML = '<div style="color:#888;font-size:13px;display:flex;align-items:center;gap:8px;">'
-            +'<div class="typing-dot" style="display:inline-flex;"><span></span><span></span><span></span></div>'
-            +'✍️ 正在生成笔记草稿…'
-            +'</div>';
-          if (area) area.scrollTop = area.scrollHeight;
+        // 收到第一个 delta 时，立即渲染空卡片骨架
+        if (!cardShown) {
+          cardShown = true;
+          if (bubble) {
+            bubble.style.padding = '0';
+            bubble.style.background = 'none';
+            bubble.style.boxShadow = 'none';
+            bubble.innerHTML = _buildLiveCard();
+          }
         }
+        // 从 streamText 中实时提取 title / body / tags 并逐字填入卡片
+        var raw = streamText.trim();
+        var titleMatch = raw.match(/"title"\s*:\s*"((?:[^"\\]|\\.)*)/);
+        var bodyMatch = raw.match(/"body"\s*:\s*"((?:[^"\\]|\\.)*)/);
+        var tagsMatch = raw.match(/"tags"\s*:\s*\[(.*)/);
+
+        var titleEl = document.getElementById(liveCardId+'-title');
+        var bodyEl = document.getElementById(liveCardId+'-body');
+        var tagsEl = document.getElementById(liveCardId+'-tags');
+
+        if (titleEl && titleMatch && titleMatch[1]) {
+          titleEl.innerHTML = _ue(titleMatch[1]) + '<span class="typing-cursor">▍</span>';
+        }
+        if (bodyEl && bodyMatch && bodyMatch[1]) {
+          var bodyText = _ue(bodyMatch[1]);
+          bodyEl.innerHTML = bodyText.replace(/\n/g, '<br>') + '<span class="typing-cursor">▍</span>';
+        }
+        if (tagsEl && tagsMatch) {
+          var tagStr = tagsMatch[1];
+          var foundTags = [];
+          var tRe = /"([^"]+)"/g; var tm;
+          while ((tm = tRe.exec(tagStr)) !== null) foundTags.push(tm[1]);
+          if (foundTags.length) {
+            tagsEl.innerHTML = foundTags.map(function(t){
+              return '<span class="xhs-tag">'+(t.startsWith('#')?t:'#'+t)+'</span>';
+            }).join(' ');
+          }
+        }
+        if (area) area.scrollTop = area.scrollHeight;
       },
       onDone: function(data) {
         var fullText = data.full_text || streamText;
-        console.log('[种薯 onDone] full_text length:', fullText.length, 'streamText length:', streamText.length);
-
-        // 解析 AI 响应（可能含笔记 JSON）
         var reply = _parseStreamResult(fullText);
-        console.log('[种薯 onDone] parsed reply:', reply.notePreview ? 'HAS NOTE' : 'NO NOTE', 'text:', reply.text.substring(0, 50));
-
-        // 如果 full_text 解析没拿到笔记，用 streamText 再试一次
         if (!reply.notePreview && streamText && streamText !== fullText) {
           var retry = _parseStreamResult(streamText);
-          if (retry.notePreview) {
-            console.log('[种薯 onDone] streamText retry got note!');
-            reply = retry;
-          }
+          if (retry.notePreview) reply = retry;
         }
-
-        // 移除流式容器
+        // 移除流式容器，用正式卡片替换
         var streamEl = document.getElementById(streamId);
         if (streamEl) streamEl.remove();
-
         chatHistory[role].push(reply);
         refreshChat(role);
       },
@@ -3545,7 +3578,6 @@ function sendMessage(role, text) {
         if (bubble) {
           bubble.innerHTML = '<span style="color:#e74c3c;">⚠️ ' + (data.message || '出了点问题') + '</span>';
         }
-        // 降级到 mock
         setTimeout(function(){
           var streamEl = document.getElementById(streamId);
           if (streamEl) streamEl.remove();
@@ -3557,7 +3589,6 @@ function sendMessage(role, text) {
       console.warn('[种薯] 流式调用失败，降级到非流式:', err);
       var streamEl = document.getElementById(streamId);
       if (streamEl) streamEl.remove();
-      // 降级到非流式
       zhongshuChat(role, text).then(function(reply){
         chatHistory[role].push(reply);
         refreshChat(role);
