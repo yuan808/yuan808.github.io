@@ -2257,7 +2257,10 @@ function renderNotePreview(note, color) {
     if (!tags.length) tags = ['#好物推荐','#种草','#护肤'];
   }
 
-  // 正文去掉 #标签行
+  // 清理 markdown/星号格式 + 去掉 #标签行
+  var _sf = function(s) { return s.replace(/\*{1,2}([^*]+)\*{1,2}/g, '$1').replace(/`{1,3}[^`]*`{1,3}/g, '').replace(/^#{1,6}\s*/gm, ''); };
+  note.title = _sf(note.title || '');
+  note.body = _sf(note.body || '');
   var bodyClean = note.body.replace(/#[\u4e00-\u9fa5\w]+/g, '').replace(/\n+$/, '').trim();
   // 智能分段
   var bodyParas = smartSplitParas(bodyClean);
@@ -3480,6 +3483,8 @@ function sendMessage(role, text) {
     var streamText = '';
     var cardShown = false;
     var _ue = function(s) { return s.replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\'); };
+    // 清理 markdown/星号等格式符号，只保留纯文字+emoji
+    var _stripFmt = function(s) { return s.replace(/\*{1,2}([^*]+)\*{1,2}/g, '$1').replace(/`{1,3}[^`]*`{1,3}/g, '').replace(/^#{1,6}\s*/gm, ''); };
 
     // 构建空卡片骨架 HTML
     function _buildLiveCard() {
@@ -3542,10 +3547,10 @@ function sendMessage(role, text) {
         var tagsEl = document.getElementById(liveCardId+'-tags');
 
         if (titleEl && titleMatch && titleMatch[1]) {
-          titleEl.innerHTML = _ue(titleMatch[1]) + '<span class="typing-cursor">▍</span>';
+          titleEl.innerHTML = _stripFmt(_ue(titleMatch[1])) + '<span class="typing-cursor">▍</span>';
         }
         if (bodyEl && bodyMatch && bodyMatch[1]) {
-          var bodyText = _ue(bodyMatch[1]);
+          var bodyText = _stripFmt(_ue(bodyMatch[1]));
           bodyEl.innerHTML = bodyText.replace(/\n/g, '<br>') + '<span class="typing-cursor">▍</span>';
         }
         if (tagsEl && tagsMatch) {
