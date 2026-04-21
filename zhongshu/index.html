@@ -3506,43 +3506,14 @@ function sendMessage(role, text) {
         }
       },
       onDelta: function(data) {
-        if (!typingStarted) {
-          typingStarted = true;
-          if (bubble) bubble.innerHTML = ''; // 清空 typing 动画
-        }
         streamText += data.content;
-        // 逐字渲染：AI 返回 JSON 时，实时提取可读内容展示
-        if (bubble) {
-          var raw = streamText.trim();
-          if (raw.startsWith('{')) {
-            // 正在生成 JSON，智能提取各字段内容展示
-            var _unescape = function(s) { return s.replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\'); };
-            var textMatch = raw.match(/"text"\s*:\s*"((?:[^"\\]|\\.)*)/); 
-            var titleMatch = raw.match(/"title"\s*:\s*"((?:[^"\\]|\\.)*)/); 
-            var bodyMatch = raw.match(/"body"\s*:\s*"((?:[^"\\]|\\.)*)/); 
-            var display = '';
-            // 优先展示 text（AI 的分析/对话文字）
-            if (textMatch && textMatch[1]) {
-              display += _unescape(textMatch[1]);
-            }
-            // 如果有 title，展示标题预览
-            if (titleMatch && titleMatch[1]) {
-              if (display) display += '\n\n';
-              display += '📝 ' + _unescape(titleMatch[1]);
-            }
-            // 如果有 body，展示正文预览
-            if (bodyMatch && bodyMatch[1]) {
-              if (display) display += '\n\n';
-              display += _unescape(bodyMatch[1]);
-            }
-            if (display) {
-              bubble.innerHTML = '<div style="line-height:1.6;">' + display.replace(/\n/g, '<br>') + '<span class="typing-cursor">▍</span></div>';
-            } else {
-              bubble.innerHTML = '<span style="color:#888;">✍️ AI 正在创作中…</span>';
-            }
-          } else {
-            bubble.innerHTML = '<div style="line-height:1.6;">' + raw.replace(/\n/g, '<br>') + '<span class="typing-cursor">▍</span></div>';
-          }
+        // 不显示中间文字，只显示创作动画，等 done 时直接出卡片
+        if (bubble && !typingStarted) {
+          typingStarted = true;
+          bubble.innerHTML = '<div style="color:#888;font-size:13px;display:flex;align-items:center;gap:8px;">'
+            +'<div class="typing-dot" style="display:inline-flex;"><span></span><span></span><span></span></div>'
+            +'✍️ 正在生成笔记草稿…'
+            +'</div>';
           if (area) area.scrollTop = area.scrollHeight;
         }
       },
