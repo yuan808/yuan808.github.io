@@ -56,15 +56,14 @@ const internships = [
     ],
   },
   {
-    id: 'baidu', company: '百度', role: '小度教育 · AI绘本交互产品经理',
-    period: '2024.10—2025.03', color: '#4DAAFF', tag: 'AIGC · 儿童教育 · Prompt',
+    id: 'xinmei', company: '新美互通', role: '输入法矩阵部门 · AI输入法产品经理',
+    period: '2024.07—2024.10', color: '#4DAAFF', tag: 'AI输入法 · AIGC · Prompt',
     points: [
-      '【业务目标】小度教育名著阅读用户没兴趣、不坚持、不会用，根据教育性与趣味性需求，推动剧情驱动 AI 生成绘本与交互',
-      '【问题定位】通过埋点数据发现沉浸时长不足 <8min、7日留存率低 <35% 的核心问题；竞品调研 ReadKidz、StoryBird.ai、childbook.ai、豆包等 AI 绘本及凯叔、Kada 在用户分层、内容生成与互动机制上的对比，确定方向为"以剧情驱动替代被动阅读"',
-      '【产品方案】设计"剧情拆解—绘本生成—多模态输出"AI 内容生产流程，整理教学目标、互动生成脚本、绘本内容的产品规范与验收标准',
-      '【Prompt】从内容的连贯性、趣味性与教学有效性制定剧集拆解、场景描述、剧情交互等模块输出要求，通过多方案对比与效果评估持续调优',
-      '【技术需求】向算法团队输出文心一言与 Stable Diffusion 的角色一致性、知识点难度分级、年龄认知适配、教育事实性增强等 7 大算法需求',
-      '【上线效果】SDK 接入小度教育平板，灰度上线覆盖用户 10 万+；A/B 测试儿童知识答题准确率均值提升 47%，家长净推荐均值 8.1 分',
+      '【业务目标】基于Typing业务场景提升趣味化表达，提升使用率、留存率、APP付费订阅率，实现商业增长',
+      '【AI角色功能】结合APP内Chat场景，制定性格、外貌DIY、场景Prompt及页面，参考benchmark选模型，定义模型级、任务级评测指标',
+      '【数据驱动迭代】基于角色性格效果和对场景境优化Prompt结构，通过多轮评测与落地验证，不断增强AI角色性格特征和回复准确率与效率',
+      '【AI主题定制】根据输入法主题数据，确定"图-主题-定制化"的DIY产品流程，制定标准和付费策略层级，设计相关页面和广告位',
+      '【上线效果】APP维持周10W+DAU，AI角色周均请求提升40%，站内信打开率提升532次，AI DIY月订阅人数增长10%',
     ],
   },
 ]
@@ -1206,12 +1205,6 @@ export default function Home({ onNavigate }) {
           <SectionLabel label="Vibe Coding" color="#2ECC71" />
           <SeedRow />
           <BrandXRow />
-        </div>
-
-        {/* ── 区块 2：实习经历 ── */}
-        <div style={{ marginBottom: 40, animation: 'fadeUp 0.4s 0.14s ease both' }}>
-          <SectionLabel label="Internship" color="#FF3B2F" />
-          <InternshipRows />
         </div>
 
         {/* ── 区块 3：设计作品集 ── */}
