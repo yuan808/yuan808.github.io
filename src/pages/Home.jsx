@@ -244,8 +244,14 @@ function SeedAgentPanel({ onClose }) {
           message: `帮我写一篇小红书种草笔记，商品关键词：${input}` })
       })
       const data = await chatRes.json()
-      if (data.note) setNote(data.note)
-      else setError('未生成笔记，请换个关键词再试')
+      if (data.note) {
+        setNote(data.note)
+      } else if (data.text && data.text.length > 20) {
+        // LLM 偶发未输出结构化格式，用纯文本兜底
+        setNote({ title: input, body: data.text, tags: [], cover_hint: '', image_query: input, product_images: [] })
+      } else {
+        setError('未生成笔记，请换个关键词再试')
+      }
     } catch {
       setError('连接失败，请稍后重试')
     } finally { setLoading(false) }
