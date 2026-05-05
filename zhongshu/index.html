@@ -3535,7 +3535,21 @@ function sendMessage(role, text) {
       },
       onDelta: function(data) {
         streamText += data.content;
-        // 收到第一个 delta 时，立即渲染空卡片骨架
+        var raw = streamText.trim();
+
+        // 判断是否为 JSON note 格式（检测到 {"text" 或 {"note" 或 "title":）
+        var looksLikeNote = raw.indexOf('"note"') >= 0 || raw.indexOf('"title"') >= 0 || (raw.charAt(0) === '{' && raw.indexOf('"') >= 0);
+
+        // 如果不是 note 格式，以纯文本气泡模式逐字显示
+        if (!looksLikeNote && !cardShown) {
+          if (bubble) {
+            bubble.innerHTML = _stripFmt(raw).replace(/\n/g, '<br>') + '<span class="typing-cursor" style="color:#999;">▍</span>';
+          }
+          if (area) area.scrollTop = area.scrollHeight;
+          return;
+        }
+
+        // 确认是 note 格式后，渲染卡片骨架
         if (!cardShown) {
           cardShown = true;
           if (bubble) {
@@ -3546,7 +3560,6 @@ function sendMessage(role, text) {
           }
         }
         // 从 streamText 中实时提取 title / body / tags 并逐字填入卡片
-        var raw = streamText.trim();
         var titleMatch = raw.match(/"title"\s*:\s*"((?:[^"\\]|\\.)*)/);
         var bodyMatch = raw.match(/"body"\s*:\s*"((?:[^"\\]|\\.)*)/);
         var tagsMatch = raw.match(/"tags"\s*:\s*\[(.*)/);
@@ -3578,14 +3591,27 @@ function sendMessage(role, text) {
       onDone: function(data) {
         if (fallbackHandled) return; // greeting/fallback 已处理，跳过
         var fullText = data.full_text || streamText;
+        var raw = fullText.trim();
+
+        // 如果流式内容不是 JSON note 格式，当作纯文本消息处理
+        var looksLikeNote = raw.indexOf('"note"') >= 0 || raw.indexOf('"title"') >= 0 || (raw.charAt(0) === '{' && raw.indexOf('"') >= 0);
+        if (!looksLikeNote || !cardShown) {
+          // 纯文本回复（如 greeting 未被 onFallback 捕获的情况）
+          var streamEl = document.getElementById(streamId);
+          if (streamEl) streamEl.remove();
+          chatHistory[role].push({ from: 'agent', text: raw });
+          refreshChat(role);
+          return;
+        }
+
         var reply = _parseStreamResult(fullText);
         if (!reply.notePreview && streamText && streamText !== fullText) {
           var retry = _parseStreamResult(streamText);
           if (retry.notePreview) reply = retry;
         }
         // 移除流式容器，用正式卡片替换
-        var streamEl = document.getElementById(streamId);
-        if (streamEl) streamEl.remove();
+        var streamEl2 = document.getElementById(streamId);
+        if (streamEl2) streamEl2.remove();
         chatHistory[role].push(reply);
         refreshChat(role);
       },
