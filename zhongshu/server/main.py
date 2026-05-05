@@ -319,10 +319,14 @@ CATEGORY_KEYWORDS = {
 }
 
 
+INTENT_AMBIGUOUS = "ambiguous"  # 模糊输入，需要 LLM 判断
+
+
 def classify_intent(message: str, session: dict) -> str:
     """
-    规则意图分类器
-    优先级：irrelevant > switch_product > rewrite > generate
+    规则意图分类器（快速路径）
+    优先级：greeting > irrelevant > url > rewrite > 品类关键词 > ambiguous
+    对于模糊输入返回 INTENT_AMBIGUOUS，由调用方决定是否走 LLM 分析
     """
     msg = message.strip().lower()
     state = session.get("state", STATE_IDLE)
@@ -333,7 +337,6 @@ def classify_intent(message: str, session: dict) -> str:
             return INTENT_GREETING
 
     # 1. 无关话题检测
-    # 短消息 + 匹配无关模式 + 没有商品相关内容
     has_url = bool(re.search(r'https?://', message))
     has_product_hint = any(
         kw in msg for cat_kws in CATEGORY_KEYWORDS.values() for kw in cat_kws
@@ -344,7 +347,7 @@ def classify_intent(message: str, session: dict) -> str:
             if re.search(pattern, msg):
                 return INTENT_IRRELEVANT
 
-    # 2. 有链接 → 如果当前在 reviewing 状态，说明是切换新商品
+    # 2. 有链接 → 明确的生成/切换
     if has_url:
         if state == STATE_REVIEWING:
             return INTENT_SWITCH
@@ -356,25 +359,82 @@ def classify_intent(message: str, session: dict) -> str:
             if kw in msg:
                 return INTENT_REWRITE
 
-    # 4. 有商品关键词 → 生成或切换
+    # 4. 有明确品类关键词 → 生成或切换
     if has_product_hint:
         if state == STATE_REVIEWING:
             return INTENT_SWITCH
         return INTENT_GENERATE
 
-    # 5. 在 idle 状态下，任何像商品描述的输入都当作生成
+    # 5. 模糊输入 → 交给 LLM 判断
     if state == STATE_IDLE and len(msg) >= 2:
-        # 排除纯改写指令
         is_rewrite = any(kw in msg for kw in REWRITE_KEYWORDS)
         if not is_rewrite:
-            return INTENT_GENERATE
+            return INTENT_AMBIGUOUS
 
-    # 6. 在 reviewing 状态下的模糊输入，默认当改写
+    # 6. reviewing 状态下的模糊输入，默认当改写
     if state == STATE_REVIEWING:
         return INTENT_REWRITE
 
     # 7. 兜底
-    return INTENT_GENERATE
+    return INTENT_AMBIGUOUS
+
+
+async def analyze_keyword(message: str) -> dict:
+    """
+    调用 LLM 判断用户输入是否为商品/产品关键词。
+    返回: {"is_product": True/False, "reply": "..."} 
+    - is_product=True: 输入是商品关键词，应该生成笔记
+    - is_product=False: 输入不是商品，reply 中包含 ≤15字的引导话术
+    """
+    prompt = f"""判断用户输入是否包含可以写小红书种草笔记的商品/产品/服务关键词。
+
+用户输入：「{message}」
+
+判断标准：
+- 如果输入中提到了具体的商品、产品、品牌、服务（如"防晒霜""iPhone""瑜伽课"），或者描述了某类可推广的东西（如"平价好用的洗面奶""夏天穿的裙子"），判定为商品。
+- 如果输入只是闲聊、提问、指令、抽象概念（如"帮我写一个""你觉得呢""什么好用"），没有具体商品指向，判定为非商品。
+
+只返回JSON，不要有其他文字：
+- 是商品：{{"is_product":true}}
+- 非商品：{{"is_product":false,"reply":"≤15字的引导话术"}}
+
+引导话术示例："告诉我商品名，帮你写笔记～""发个链接或商品名给我吧～"
+"""
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{DEEPSEEK_BASE_URL}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": MODEL,
+                    "messages": [
+                        {"role": "system", "content": "你是意图分类器，只返回JSON。"},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "temperature": 0,
+                    "max_tokens": 100,
+                },
+            )
+            if resp.status_code == 200:
+                content = resp.json()["choices"][0]["message"]["content"].strip()
+                # 解析 JSON
+                data = json.loads(content)
+                if data.get("is_product"):
+                    return {"is_product": True, "reply": ""}
+                else:
+                    reply = data.get("reply", "发个商品链接或名称给我吧～")
+                    # 确保不超过15字
+                    if len(reply) > 15:
+                        reply = reply[:15]
+                    return {"is_product": False, "reply": reply}
+    except Exception as e:
+        print(f"[analyze_keyword] LLM 调用失败: {e}")
+
+    # 降级：默认当作商品处理（宁可生成也不要卡住用户）
+    return {"is_product": True, "reply": ""}
 
 
 def extract_user_profile(message: str, profile: dict) -> dict:
@@ -526,6 +586,14 @@ async def chat(req: ChatRequest):
         fallback_text = random.choice(FALLBACK_RESPONSES)
         return {"text": fallback_text, "note": None, "intent": intent, "state": session["state"]}
 
+    # ③-c 模糊输入：调用 LLM 判断是否为商品关键词
+    if intent == INTENT_AMBIGUOUS:
+        analysis = await analyze_keyword(req.message)
+        if not analysis["is_product"]:
+            return {"text": analysis["reply"], "note": None, "intent": "clarify", "state": session["state"]}
+        # 是商品 → 继续走生成流程
+        intent = INTENT_GENERATE
+
     # ④ 改写意图 → 走 rewrite 逻辑（带上下文）
     if intent == INTENT_REWRITE and session.get("last_note"):
         session["state"] = STATE_REWRITING
@@ -672,6 +740,19 @@ async def chat_stream(req: ChatRequest):
             yield sse_event("fallback", {"text": fallback_text})
             yield sse_event("done", {"full_text": fallback_text})
         return StreamingResponse(fallback_gen(), media_type="text/event-stream")
+
+    # ③-c 模糊输入：调用 LLM 判断是否为商品关键词
+    if intent == INTENT_AMBIGUOUS:
+        analysis = await analyze_keyword(req.message)
+        if not analysis["is_product"]:
+            clarify_text = analysis["reply"]
+            async def clarify_gen():
+                yield sse_event("intent", {"intent": "clarify", "state": session["state"]})
+                yield sse_event("fallback", {"text": clarify_text})
+                yield sse_event("done", {"full_text": clarify_text})
+            return StreamingResponse(clarify_gen(), media_type="text/event-stream")
+        # 是商品 → 继续走生成流程
+        intent = INTENT_GENERATE
 
     # ④ 改写意图（带上下文）
     if intent == INTENT_REWRITE and session.get("last_note"):
