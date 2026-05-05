@@ -4247,6 +4247,8 @@ function collabKol() {
 // ═══ 我的（运营监控中心） ═══
 // 筛选状态
 var mineFilter = { cat: '全部', time: '近30天' };
+// 视图切换状态：'notes' 历史笔记 | 'orders' 订单管理
+var mineViewTab = 'notes';
 
 // ── 达人「个人品牌管理」模块（仅 KOL 展示） ──
 function renderKolBranding(c, light) {
@@ -4372,11 +4374,13 @@ function renderMine(role) {
   // 各身份的历史笔记数据（含销售/效果数据）
   var notes = {
     brand:[
-      {i:'🌟',t:'全新成分精华，护肤界的革命来了',cat:'护肤',date:'04-15',status:'已发布',views:'4,200',likes:'312',comments:'89',sales:'',extra:'品牌搜索+18%'},
-      {i:'🔬',t:'烟酰胺+玻尿酸，这个成分组合绝了',cat:'护肤',date:'04-10',status:'已发布',views:'3,100',likes:'245',comments:'67',sales:'',extra:'达人转发×3'},
-      {i:'👥',t:'用了3个月，她的皮肤发生了什么变化',cat:'护肤',date:'04-05',status:'已发布',views:'2,800',likes:'198',comments:'54',sales:'',extra:''},
-      {i:'🏆',t:'同价位精华横评，谁才是真正的王者',cat:'彩妆',date:'03-28',status:'已发布',views:'5,600',likes:'421',comments:'132',sales:'',extra:'热门笔记'},
-      {i:'💎',t:'香氛新品上市，这个味道太绝了',cat:'香氛',date:'03-20',status:'草稿',views:'',likes:'',comments:'',sales:'',extra:''},
+      {i:'🌟',t:'全新成分精华，护肤界的革命来了',cat:'护肤',date:'04-15',status:'已发布',views:'4,200',likes:'312',comments:'89',sales:'46单',conv:'3.2%',extra:'品牌搜索+18%'},
+      {i:'🔬',t:'烟酰胺+玻尿酸，这个成分组合绝了',cat:'护肤',date:'04-10',status:'已发布',views:'3,100',likes:'245',comments:'67',sales:'28单',conv:'2.8%',extra:'达人转发×3'},
+      {i:'👥',t:'用了3个月，她的皮肤发生了什么变化',cat:'护肤',date:'04-05',status:'已发布',views:'2,800',likes:'198',comments:'54',sales:'19单',conv:'2.1%',extra:''},
+      {i:'🏆',t:'同价位精华横评，谁才是真正的王者',cat:'彩妆',date:'03-28',status:'已发布',views:'5,600',likes:'421',comments:'132',sales:'62单',conv:'4.5%',extra:'热门笔记'},
+      {i:'💎',t:'香氛新品上市，这个味道太绝了',cat:'香氛',date:'03-20',status:'已发布',views:'2,400',likes:'178',comments:'41',sales:'15单',conv:'2.0%',extra:''},
+      {i:'🧪',t:'敏感肌急救指南，这3步就够了',cat:'护肤',date:'03-15',status:'已发布',views:'3,800',likes:'290',comments:'76',sales:'35单',conv:'3.6%',extra:''},
+      {i:'🍽️',t:'代餐奶昔测评，减脂期的救星',cat:'食品',date:'03-10',status:'已发布',views:'2,600',likes:'210',comments:'58',sales:'22单',conv:'3.1%',extra:''},
     ],
     seller:[
       {i:'💰',t:'这款防晒喷雾真的绝了！回购第三瓶',cat:'护肤',date:'04-15',status:'已发布',views:'2,800',likes:'234',comments:'56',sales:'18单',conv:'7.7%'},
@@ -4391,11 +4395,12 @@ function renderMine(role) {
       {i:'👜',t:'平价包包合集，学生党也能拥有质感',cat:'服饰',date:'03-28',status:'已发布',views:'3,000',likes:'267',comments:'61',sales:'19单',conv:'7.5%'},
     ],
     kol:[
-      {i:'💫',t:'护肤日记 Vol.12 | 最近在用的宝藏单品',cat:'护肤',date:'04-16',status:'已发布',views:'6,400',likes:'512',comments:'143',sales:'商单¥2,000',extra:'互动率8.0%'},
-      {i:'🔬',t:'某品牌精华深度测评，用了2周说真话',cat:'护肤',date:'04-11',status:'已发布',views:'4,800',likes:'389',comments:'112',sales:'商单¥1,500',extra:'互动率8.1%'},
-      {i:'📖',t:'护肤误区大盘点！这5个错误你中了几个',cat:'护肤',date:'04-06',status:'已发布',views:'8,200',likes:'678',comments:'234',sales:'',extra:'收藏率12%'},
-      {i:'🎬',t:'和某彩妆品牌合作 | 这款口红真的惊喜',cat:'彩妆',date:'03-30',status:'已发布',views:'5,100',likes:'423',comments:'98',sales:'商单¥3,000',extra:'互动率8.3%'},
-      {i:'💄',t:'穿搭日记 | 春天必备的几件单品',cat:'穿搭',date:'03-22',status:'草稿',views:'',likes:'',comments:'',sales:'',extra:''},
+      {i:'💫',t:'护肤日记 Vol.12 | 最近在用的宝藏单品',cat:'护肤',date:'04-16',status:'已发布',views:'6,400',likes:'512',comments:'143',sales:'商单¥2,000',conv:'8.0%',extra:'互动率8.0%'},
+      {i:'🔬',t:'某品牌精华深度测评，用了2周说真话',cat:'护肤',date:'04-11',status:'已发布',views:'4,800',likes:'389',comments:'112',sales:'商单¥1,500',conv:'8.1%',extra:'互动率8.1%'},
+      {i:'📖',t:'护肤误区大盘点！这5个错误你中了几个',cat:'护肤',date:'04-06',status:'已发布',views:'8,200',likes:'678',comments:'234',sales:'12单',conv:'5.2%',extra:'收藏率12%'},
+      {i:'🎬',t:'和某彩妆品牌合作 | 这款口红真的惊喜',cat:'彩妆',date:'03-30',status:'已发布',views:'5,100',likes:'423',comments:'98',sales:'商单¥3,000',conv:'8.3%',extra:'互动率8.3%'},
+      {i:'👗',t:'穿搭日记 | 春天必备的几件单品',cat:'穿搭',date:'03-22',status:'已发布',views:'3,200',likes:'267',comments:'72',sales:'18单',conv:'6.1%',extra:''},
+      {i:'🍜',t:'探店 | 这家隐藏小馆太好吃了',cat:'美食',date:'03-15',status:'已发布',views:'4,500',likes:'380',comments:'95',sales:'8单',conv:'3.2%',extra:''},
     ]
   };
 
@@ -4532,45 +4537,97 @@ function renderMine(role) {
     +'</div></div>'
     +'</div></div>'
 
-    // ── seller: 订单管理（按品类分组） / 其他角色: 历史笔记 ──
-    +(role==='seller' ? (function(){
-      // 按品类分组
-      var catOrder = ['护肤','彩妆','香氛','服饰'];
+    // ── Tab 切换栏：历史笔记 / 订单管理 ──
+    +'<div style="display:flex;align-items:center;margin:0 12px 10px;background:#f5f5f5;border-radius:12px;padding:3px;">'
+    +'<div onclick="switchMineView(\'notes\',\''+role+'\')" style="flex:1;text-align:center;padding:8px 0;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;transition:all .2s;background:'+(mineViewTab==='notes'?'#fff':'transparent')+';color:'+(mineViewTab==='notes'?c:'#999')+';box-shadow:'+(mineViewTab==='notes'?'0 1px 4px rgba(0,0,0,.08)':'none')+';">📝 历史笔记</div>'
+    +'<div onclick="switchMineView(\'orders\',\''+role+'\')" style="flex:1;text-align:center;padding:8px 0;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;transition:all .2s;background:'+(mineViewTab==='orders'?'#fff':'transparent')+';color:'+(mineViewTab==='orders'?c:'#999')+';box-shadow:'+(mineViewTab==='orders'?'0 1px 4px rgba(0,0,0,.08)':'none')+';">📦 订单管理</div>'
+    +'</div>'
+
+    // ── 内容区域根据 Tab 切换 ──
+    +(mineViewTab==='notes' ? (function(){
+      // ═══ 历史笔记视图 ═══
+      var html = '<div style="padding:0 16px 8px;font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:space-between;">'
+        +'<span style="color:#666;">共 '+filtered.length+' 篇</span>'
+        +'</div>';
+      html += filtered.map(function(n){
+        var isPub = n.status==='已发布';
+        return '<div style="background:#fff;margin:0 12px 8px;border-radius:14px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,.06);cursor:pointer;" onclick="showNoteDetail()">'
+          +'<div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px;">'
+          +'<div style="width:44px;height:44px;border-radius:10px;background:'+light+';display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;">'+n.i+'</div>'
+          +'<div style="flex:1;min-width:0;">'
+          +'<div style="font-size:13px;font-weight:700;color:#1a1a1a;line-height:1.4;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">'+n.t+'</div>'
+          +'<div style="font-size:11px;color:#bbb;margin-top:3px;">'+n.cat+' · '+n.date+'</div>'
+          +'</div>'
+          +'<span style="font-size:11px;padding:3px 8px;border-radius:8px;font-weight:600;flex-shrink:0;background:'+(isPub?'#e8f5e9':'#f5f5f5')+';color:'+(isPub?'#2e7d32':'#999')+';">'+n.status+'</span>'
+          +'</div>'
+          +(isPub
+            ? '<div style="display:flex;gap:0;border-top:1px solid #f5f5f5;padding-top:8px;">'
+              +'<div style="flex:1;text-align:center;border-right:1px solid #f5f5f5;">'
+              +'<div style="font-size:13px;font-weight:700;color:#1a1a1a;">'+n.views+'</div>'
+              +'<div style="font-size:10px;color:#bbb;margin-top:1px;">曝光</div></div>'
+              +'<div style="flex:1;text-align:center;border-right:1px solid #f5f5f5;">'
+              +'<div style="font-size:13px;font-weight:700;color:#1a1a1a;">'+n.likes+'</div>'
+              +'<div style="font-size:10px;color:#bbb;margin-top:1px;">点赞</div></div>'
+              +'<div style="flex:1;text-align:center;'+(n.sales?'border-right:1px solid #f5f5f5;':'')+'">'
+              +'<div style="font-size:13px;font-weight:700;color:#1a1a1a;">'+n.comments+'</div>'
+              +'<div style="font-size:10px;color:#bbb;margin-top:1px;">评论</div></div>'
+              +(n.sales
+                ? '<div style="flex:1;text-align:center;">'
+                  +'<div style="font-size:13px;font-weight:700;color:'+c+';">'+n.sales+'</div>'
+                  +'<div style="font-size:10px;color:#bbb;margin-top:1px;">'+(role==='kol'?'收入':'销售')+'</div></div>'
+                : '')
+              +'</div>'
+              +(n.extra?'<div style="margin-top:6px;font-size:11px;color:'+c+';font-weight:600;padding:4px 8px;background:'+light+';border-radius:6px;display:inline-block;">'+n.extra+'</div>':'')
+            : '<div style="font-size:12px;color:#bbb;padding-top:4px;">草稿未发布 · 点击继续编辑</div>'
+          )
+          +'</div>';
+      }).join('');
+      return html;
+    })()
+    : (function(){
+      // ═══ 订单管理视图（按品类分组） ═══
+      var catOrder = cats[role].filter(function(c){ return c!=='全部'; });
       var grouped = {};
       catOrder.forEach(function(cat){ grouped[cat] = []; });
       filtered.forEach(function(n){ if(grouped[n.cat]) grouped[n.cat].push(n); });
 
-      // 品类汇总数据（mock）
-      var catSummary = {
-        '护肤': {icon:'🧴',totalSales:'100单',gmv:'¥14,900',avgConv:'7.6%',trend:'+12%',up:true},
-        '彩妆': {icon:'💄',totalSales:'31单',gmv:'¥4,650',avgConv:'5.8%',trend:'+5%',up:true},
-        '香氛': {icon:'🌿',totalSales:'8单',gmv:'¥1,120',avgConv:'5.1%',trend:'-2%',up:false},
-        '服饰': {icon:'👗',totalSales:'33单',gmv:'¥4,620',avgConv:'6.8%',trend:'+8%',up:true}
+      // 各角色品类汇总数据（mock）
+      var allCatSummary = {
+        brand: {
+          '护肤':{icon:'🧴',totalSales:'128单',gmv:'¥38,400',avgConv:'3.0%',trend:'+12%',up:true},
+          '彩妆':{icon:'💄',totalSales:'62单',gmv:'¥18,600',avgConv:'4.5%',trend:'+8%',up:true},
+          '香氛':{icon:'🌿',totalSales:'15单',gmv:'¥6,750',avgConv:'2.0%',trend:'+3%',up:true},
+          '食品':{icon:'🍽️',totalSales:'22单',gmv:'¥4,400',avgConv:'3.1%',trend:'-1%',up:false}
+        },
+        seller: {
+          '护肤':{icon:'🧴',totalSales:'100单',gmv:'¥14,900',avgConv:'7.6%',trend:'+12%',up:true},
+          '彩妆':{icon:'💄',totalSales:'31单',gmv:'¥4,650',avgConv:'5.8%',trend:'+5%',up:true},
+          '香氛':{icon:'🌿',totalSales:'8单',gmv:'¥1,120',avgConv:'5.1%',trend:'-2%',up:false},
+          '服饰':{icon:'👗',totalSales:'33单',gmv:'¥4,620',avgConv:'6.8%',trend:'+8%',up:true}
+        },
+        kol: {
+          '护肤':{icon:'🧴',totalSales:'商单×3',gmv:'¥5,500',avgConv:'7.1%',trend:'+15%',up:true},
+          '彩妆':{icon:'💄',totalSales:'商单×1',gmv:'¥3,000',avgConv:'8.3%',trend:'+5%',up:true},
+          '穿搭':{icon:'👗',totalSales:'18单',gmv:'¥2,700',avgConv:'6.1%',trend:'+3%',up:true},
+          '美食':{icon:'🍜',totalSales:'8单',gmv:'¥960',avgConv:'3.2%',trend:'-2%',up:false}
+        }
       };
+      var catSummary = allCatSummary[role] || {};
 
-      // 如果筛选了品类，只展示该品类
       var displayCats = mineFilter.cat==='全部' ? catOrder : catOrder.filter(function(cat){ return cat===mineFilter.cat; });
-
       var totalNotes = filtered.length;
-      var totalSalesNum = 0;
-      filtered.forEach(function(n){ if(n.sales) totalSalesNum += parseInt(n.sales); });
 
-      var html = '';
-      // 标题
-      html += '<div style="padding:0 16px 8px;font-size:15px;font-weight:700;display:flex;align-items:center;justify-content:space-between;">'
-        +'<span>📦 订单管理</span>'
-        +'<span style="font-size:12px;color:#999;">'+displayCats.length+' 个品类 · '+totalNotes+' 篇笔记</span>'
+      var html = '<div style="padding:0 16px 8px;font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:space-between;">'
+        +'<span style="color:#666;">'+displayCats.length+' 个品类 · '+totalNotes+' 篇笔记</span>'
         +'</div>';
 
-      // 按品类遍历
       displayCats.forEach(function(cat){
         var catNotes = grouped[cat];
         var summary = catSummary[cat];
-        if(!catNotes || catNotes.length===0) return;
+        if(!catNotes || catNotes.length===0 || !summary) return;
 
-        // 品类卡片
         html += '<div style="background:#fff;margin:0 12px 12px;border-radius:14px;box-shadow:0 1px 4px rgba(0,0,0,.06);overflow:hidden;">';
-        // 品类头部：图标 + 名称 + 销售概况
+        // 品类头部
         html += '<div style="padding:14px 14px 10px;border-bottom:1px solid #f5f5f5;">'
           +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">'
           +'<div style="display:flex;align-items:center;gap:8px;">'
@@ -4580,7 +4637,7 @@ function renderMine(role) {
           +'</div>'
           +'<span style="font-size:11px;font-weight:700;color:'+(summary.up?'#00b894':'#ff2442')+';">'+(summary.up?'↑':'↓')+summary.trend+'</span>'
           +'</div>';
-        // 品类销售数据行
+        // 品类销售数据
         html += '<div style="display:flex;gap:0;">'
           +'<div style="flex:1;text-align:center;border-right:1px solid #f5f5f5;">'
           +'<div style="font-size:14px;font-weight:800;color:'+c+';">'+summary.totalSales+'</div>'
@@ -4593,7 +4650,7 @@ function renderMine(role) {
           +'<div style="font-size:10px;color:#bbb;margin-top:2px;">平均转化率</div></div>'
           +'</div></div>';
 
-        // 关联笔记列表
+        // 关联笔记
         html += '<div style="padding:10px 14px 6px;">'
           +'<div style="font-size:11px;color:#999;margin-bottom:8px;">关联笔记 ('+catNotes.length+')</div>';
         catNotes.forEach(function(n){
@@ -4604,8 +4661,8 @@ function renderMine(role) {
             +'<div style="font-size:10px;color:#bbb;margin-top:2px;">'+n.date+' · 曝光 '+n.views+' · 点赞 '+n.likes+' · 评论 '+n.comments+'</div>'
             +'</div>'
             +'<div style="text-align:right;flex-shrink:0;">'
-            +'<div style="font-size:13px;font-weight:800;color:'+c+';">'+n.sales+'</div>'
-            +'<div style="font-size:10px;color:#999;margin-top:1px;">转化 '+n.conv+'</div>'
+            +'<div style="font-size:13px;font-weight:800;color:'+c+';">'+(n.sales||'-')+'</div>'
+            +'<div style="font-size:10px;color:#999;margin-top:1px;">转化 '+(n.conv||'-')+'</div>'
             +'</div>'
             +'</div>';
         });
@@ -4614,48 +4671,7 @@ function renderMine(role) {
 
       return html;
     })()
-    : // 非 seller 角色保持原有历史笔记列表
-    '<div style="padding:0 16px 8px;font-size:15px;font-weight:700;display:flex;align-items:center;justify-content:space-between;">'
-    +'<span>📝 历史笔记</span>'
-    +'<span style="font-size:12px;color:#999;">共 '+filtered.length+' 篇</span>'
-    +'</div>'
-    +filtered.map(function(n){
-      var isPub = n.status==='已发布';
-      return '<div style="background:#fff;margin:0 12px 8px;border-radius:14px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,.06);cursor:pointer;" onclick="showNoteDetail()">'
-        +'<div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px;">'
-        +'<div style="width:44px;height:44px;border-radius:10px;background:'+light+';display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;">'+n.i+'</div>'
-        +'<div style="flex:1;min-width:0;">'
-        +'<div style="font-size:13px;font-weight:700;color:#1a1a1a;line-height:1.4;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">'+n.t+'</div>'
-        +'<div style="font-size:11px;color:#bbb;margin-top:3px;">'+n.cat+' · '+n.date+'</div>'
-        +'</div>'
-        +'<span style="font-size:11px;padding:3px 8px;border-radius:8px;font-weight:600;flex-shrink:0;background:'+(isPub?'#e8f5e9':'#f5f5f5')+';color:'+(isPub?'#2e7d32':'#999')+';">'+n.status+'</span>'
-        +'</div>'
-        +(isPub
-          ? '<div style="display:flex;gap:0;border-top:1px solid #f5f5f5;padding-top:8px;">'
-            +'<div style="flex:1;text-align:center;border-right:1px solid #f5f5f5;">'
-            +'<div style="font-size:13px;font-weight:700;color:#1a1a1a;">'+n.views+'</div>'
-            +'<div style="font-size:10px;color:#bbb;margin-top:1px;">曝光</div></div>'
-            +'<div style="flex:1;text-align:center;border-right:1px solid #f5f5f5;">'
-            +'<div style="font-size:13px;font-weight:700;color:#1a1a1a;">'+n.likes+'</div>'
-            +'<div style="font-size:10px;color:#bbb;margin-top:1px;">点赞</div></div>'
-            +'<div style="flex:1;text-align:center;'+(n.sales?'border-right:1px solid #f5f5f5;':'')+'">'
-            +'<div style="font-size:13px;font-weight:700;color:#1a1a1a;">'+n.comments+'</div>'
-            +'<div style="font-size:10px;color:#bbb;margin-top:1px;">评论</div></div>'
-            +(n.sales
-              ? '<div style="flex:1;text-align:center;">'
-                +'<div style="font-size:13px;font-weight:700;color:'+c+';">'+n.sales+'</div>'
-                +'<div style="font-size:10px;color:#bbb;margin-top:1px;">'+(role==='kol'?'收入':'销售')+'</div></div>'
-              : '')
-            +'</div>'
-            +(n.extra?'<div style="margin-top:6px;font-size:11px;color:'+c+';font-weight:600;padding:4px 8px;background:'+light+';border-radius:6px;display:inline-block;">'+n.extra+'</div>':'')
-          : '<div style="font-size:12px;color:#bbb;padding-top:4px;">草稿未发布 · 点击继续编辑</div>'
-        )
-        +'</div>';
-    }).join('')
     )
-
-    // ── 销售情况汇总（seller 已整合到订单管理中，此处不再重复） ──
-    +(role==='seller' ? '' : '')
 
     +(role==='kol'
       ? '<div style="padding:4px 16px 8px;font-size:15px;font-weight:700;">💰 商单收入汇总</div>'
@@ -4712,6 +4728,10 @@ function mineFilterCat(cat, role) {
 }
 function mineFilterTime(t, role) {
   mineFilter.time = t;
+  renderMine(role);
+}
+function switchMineView(tab, role) {
+  mineViewTab = tab;
   renderMine(role);
 }
 function showNoteDetail() {
