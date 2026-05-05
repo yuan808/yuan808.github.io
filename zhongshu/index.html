@@ -3381,6 +3381,10 @@ function zhongshuChat(role, text, _retried) {
     });
   }).then(function(j){
     if (j && j.from === 'agent') return j; // 已经被递归处理过
+    // 处理 confirm_save_draft 意图（切换商品前保存草稿）
+    if (j.intent === 'confirm_save_draft') {
+      return { from: 'agent', text: '', notePreview: null, _confirmDraft: true, _draftNote: j.draft_note, _pendingMsg: j.pending_message };
+    }
     // 映射到 notePreview，tags 独立字段直接传入
     var notePreview = null;
     if (j.note && (j.note.title || j.note.body)) {
@@ -3443,6 +3447,7 @@ function zhongshuChatStream(role, text, callbacks, _retried) {
               else if (eventType === 'done' && callbacks.onDone) callbacks.onDone(data);
               else if (eventType === 'error' && callbacks.onError) callbacks.onError(data);
               else if ((eventType === 'greeting' || eventType === 'fallback') && callbacks.onFallback) callbacks.onFallback(data);
+              else if (eventType === 'confirm_save_draft' && callbacks.onConfirmSaveDraft) callbacks.onConfirmSaveDraft(data);
             } catch(e) { console.warn('[SSE parse]', e, dataStr); }
           });
 
@@ -3602,12 +3607,23 @@ function sendMessage(role, text) {
         if (streamEl) streamEl.remove();
         chatHistory[role].push({ from: 'agent', text: data.text || data.message || '' });
         refreshChat(role);
+      },
+      onConfirmSaveDraft: function(data) {
+        // 切换商品前询问是否保存当前草稿
+        fallbackHandled = true;
+        var streamEl = document.getElementById(streamId);
+        if (streamEl) streamEl.remove();
+        showSaveDraftConfirm(role, data.draft_note, data.pending_message);
       }
     }).catch(function(err){
       console.warn('[种薯] 流式调用失败，降级到非流式:', err);
       var streamEl = document.getElementById(streamId);
       if (streamEl) streamEl.remove();
       zhongshuChat(role, text).then(function(reply){
+        if (reply._confirmDraft) {
+          showSaveDraftConfirm(role, reply._draftNote, reply._pendingMsg);
+          return;
+        }
         chatHistory[role].push(reply);
         refreshChat(role);
       }).catch(function(err2){
@@ -3725,15 +3741,18 @@ function mockAgentReply(role, text) {
     var notes = {
       brand: {
         title: '烟酰胺5%+玻尿酸，这个成分组合真的绝了',
-        body: '品牌方说这款精华是「成分党的诚意之作」，今天来帮大家深度解析 🔬\n\n【为什么选这款？】\n✦ 烟酰胺5%黄金浓度：美白提亮不刺激，敏感肌也能用\n✦ 三重玻尿酸：从表皮到真皮层层补水，喝饱水的皮肤才能吸收后续护肤品\n✦ 积雪草提取物：修护受损屏障，越用皮肤越稳\n\n【适合人群】\n暗沉 ✓  毛孔粗大 ✓  油皮/混油皮 ✓  想美白 ✓\n\n【使用建议】\n早晚洁面后第一步使用，3-4滴轻拍至吸收\n\n#烟酰胺 #成分党护肤 #美白精华 #平价好物'
+        body: '烟酰胺5%黄金浓度搭配三重玻尿酸，美白补水双管齐下 🔬\n敏感肌也能放心用，积雪草修护屏障越用越稳\n油皮混油皮暗沉毛孔粗大的姐妹快冲\n早晚洁面后3滴轻拍，两周看到变化 ✨',
+        tags: ['#烟酰胺','#成分党护肤','#美白精华','#平价好物','#护肤']
       },
       seller: {
-        title: '89元买到大牌同款成分！这款精华我回购第3瓶了',
-        body: '姐妹们！今天必须来安利这款精华，用完一瓶直接回购 🛒\n\n【为什么回购第3瓶？】\n✦ 成分不输大牌：烟酰胺5%+三重玻尿酸，某牌同款成分要300+\n✦ 效果真实可见：用了2周，同事问我最近换了什么护肤品\n✦ 价格太香了：才89元，学生党也买得起\n\n【我的真实感受】\n质地：水润不黏腻，秒吸收不搓泥\n效果：毛孔细了，皮肤亮了，素颜也有底气\n\n需要的姐妹链接在主页，现在还有优惠券！\n\n#好物推荐 #平价护肤 #烟酰胺精华 #学生党必备'
+        title: '89元买到大牌同款成分！回购第3瓶了',
+        body: '烟酰胺5%+三重玻尿酸，某大牌同款成分要300+这个才89 🛒\n用了两周同事问我换了什么护肤品，效果肉眼可见\n质地水润秒吸收不搓泥，油皮夏天也舒服\n学生党平价美白冲这瓶就够了，链接在主页 💰',
+        tags: ['#好物推荐','#平价护肤','#烟酰胺精华','#学生党必备','#回购']
       },
       kol: {
-        title: '用了30天的真实反馈 | 这款精华让我戒掉了贵妇品牌',
-        body: '说真的，我之前是贵妇护肤品的忠实用户，直到朋友推荐了这款89块的精华 🌸\n\n【第一次用的感受】\n打开瓶盖，质地比想象中水润，上脸秒吸收，没有任何不适感。作为敏感肌，这点很重要。\n\n【用了一周】\n皮肤开始变得水润，上妆前不用再担心卡粉了。\n\n【用了一个月】\n闺蜜问我最近是不是做了什么项目，皮肤怎么变好了。我说就是换了这瓶精华。\n\n成分很简单：烟酰胺5%+三重玻尿酸，但就是这种「够用就好」的配方，反而让皮肤喘了口气。\n\n不是广告，就是真实用后感。你们用过吗？\n\n#护肤日记 #真实测评 #烟酰胺 #敏感肌护肤'
+        title: '用了30天真实反馈 | 89元精华让我戒掉贵妇品牌',
+        body: '之前用300+的贵妇精华，朋友推荐这款89块的试了一个月 🌸\n烟酰胺5%+三重玻尿酸，成分简单但效果不输大牌\n第一周皮肤变水润不卡粉，一个月后闺蜜问我做了什么项目\n敏感肌实测无刺激，性价比真的太高了 ✅',
+        tags: ['#护肤日记','#真实测评','#烟酰胺','#敏感肌护肤','#精华推荐']
       }
     };
 
@@ -3744,7 +3763,8 @@ function mockAgentReply(role, text) {
   if (t.indexOf('年轻') >= 0 || t.indexOf('风格') >= 0 || t.indexOf('换') >= 0) {
     return { from:'agent', text:'', notePreview: {
       title: '姐妹们！89块的精华真的太绝了！！',
-      body: '不是我说，这款精华真的让我破防了 😭\n\n烟酰胺5%+三重玻尿酸，某牌同款成分要300+，这个才89！！\n\n用了两周，同学问我最近换了什么护肤品，皮肤怎么变好了哈哈哈\n\n油皮/混油皮/想美白的姐妹冲就完了！\n\n链接在主页，需要的扣1⃣\n\n#护肤 #平价好物 #烟酰胺 #学生党'
+      body: '不是我说这款精华真的让我破防了，烟酰胺5%+玻尿酸才89块 😭\n用了两周同学问我换了什么护肤品哈哈哈效果太明显\n油皮混油皮想美白的姐妹冲就完了不踩雷\n链接在主页需要的扣1，手慢无 🏃‍♀️',
+      tags: ['#护肤','#平价好物','#烟酰胺','#学生党','#美白']
     }};
   }
 
@@ -3752,7 +3772,8 @@ function mockAgentReply(role, text) {
   if (t.indexOf('竞品') >= 0 || t.indexOf('对比') >= 0) {
     return { from:'agent', text:'', notePreview: {
       title: '同样是烟酰胺精华，为什么我选89的不选300的？',
-      body: '成分党来了，今天做个横评 🔬\n\n【成分对比】\n某大牌（¥320）：烟酰胺3%+玻尿酸\n这款（¥89）：烟酰胺5%+三重玻尿酸+积雪草\n\n结论：成分浓度更高，配方更完整，价格只有1/3\n\n【质地对比】\n大牌：偏厚重，油皮夏天有点闷\n这款：水润轻薄，油皮夏天也舒服\n\n【效果对比】\n用了同样的30天，这款美白效果不输，毛孔改善更明显\n\n不是说大牌不好，只是这个价位真的没必要花那么多\n\n#成分党 #护肤测评 #平价替代 #烟酰胺'
+      body: '某大牌烟酰胺3%卖320，这款5%+三重玻尿酸才89 🔬\n质地对比大牌偏厚重油皮闷，这款水润轻薄秒吸收\n同样用30天美白效果不输，毛孔改善更明显\n成分浓度更高价格只有三分之一，性价比无敌 💪',
+      tags: ['#成分党','#护肤测评','#平价替代','#烟酰胺','#横评']
     }};
   }
 
@@ -3775,7 +3796,8 @@ function mockAgentReply(role, text) {
   if (t.indexOf('商单') >= 0 || t.indexOf('合规') >= 0 || t.indexOf('合作') >= 0) {
     return { from:'agent', text:'', notePreview: {
       title: '和某护肤品牌合作 | 这款精华真的让我惊喜',
-      body: '这次收到了品牌方寄来的烟酰胺精华，用了三周来说说真实感受 ✨\n\n【产品信息】\n烟酰胺亮肤精华液，主打成分：烟酰胺5%+三重玻尿酸\n\n【我的真实体验】\n质地：水润轻薄，上脸秒吸收，不搓泥\n气味：淡淡的，不刺鼻\n效果：用了一周皮肤明显水润了，两周后同事说我皮肤变好了\n\n【适合人群】\n油皮/混油皮 ✓  想美白提亮 ✓  毛孔粗大 ✓\n\n感兴趣的可以去主页看链接～\n\n*本文为品牌合作内容\n\n#护肤 #精华推荐 #品牌合作 #烟酰胺'
+      body: '收到品牌方寄来的烟酰胺精华用了三周来说真实感受 ✨\n质地水润轻薄秒吸收不搓泥，一周后皮肤明显水润\n烟酰胺5%+三重玻尿酸，油皮混油皮想美白的都适合\n感兴趣主页看链接～ *本文为品牌合作内容',
+      tags: ['#护肤','#精华推荐','#品牌合作','#烟酰胺','#商单']
     }};
   }
 
@@ -4258,8 +4280,93 @@ function collabKol() {
 // ═══ 我的（运营监控中心） ═══
 // 筛选状态
 var mineFilter = { cat: '全部', time: '近30天' };
-// 视图切换状态：'notes' 历史笔记 | 'orders' 订单管理
+// 视图切换状态：'notes' 历史笔记 | 'orders' 订单管理 | 'drafts' 草稿箱
 var mineViewTab = 'notes';
+// 草稿箱本地存储（前端 localStorage 持久化）
+var localDrafts = { brand: [], seller: [], kol: [] };
+(function _loadDrafts() {
+  try {
+    var saved = localStorage.getItem('zhongshu_drafts');
+    if (saved) localDrafts = JSON.parse(saved);
+  } catch(_) {}
+})();
+function _saveDraftsToStorage() {
+  try { localStorage.setItem('zhongshu_drafts', JSON.stringify(localDrafts)); } catch(_) {}
+}
+function saveDraftLocal(role, note, productInput) {
+  var draft = { id: Date.now().toString(36), note: note, product: productInput || '', time: new Date().toLocaleDateString('zh-CN') };
+  localDrafts[role] = localDrafts[role] || [];
+  localDrafts[role].unshift(draft);
+  if (localDrafts[role].length > 20) localDrafts[role] = localDrafts[role].slice(0, 20);
+  _saveDraftsToStorage();
+  showToast('✅ 已保存到草稿箱');
+}
+function deleteDraftLocal(role, draftId) {
+  localDrafts[role] = (localDrafts[role] || []).filter(function(d){ return d.id !== draftId; });
+  _saveDraftsToStorage();
+  renderMine(role);
+}
+function useDraftInChat(role, draftId) {
+  var draft = (localDrafts[role] || []).find(function(d){ return d.id === draftId; });
+  if (!draft || !draft.note) { showToast('草稿不存在'); return; }
+  // 将草稿作为 agent 回复插入聊天
+  chatHistory[role] = chatHistory[role] || [];
+  chatHistory[role].push({ from: 'agent', text: '📥 从草稿箱恢复：', notePreview: draft.note });
+  switchTab('create');
+  setTimeout(function(){ refreshChat(role); }, 100);
+}
+function showSaveDraftConfirm(role, draftNote, pendingMessage) {
+  // 弹出确认弹窗
+  var overlay = document.createElement('div');
+  overlay.id = 'draft-confirm-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;';
+  var cfg = ROLE_CONFIG[role];
+  overlay.innerHTML = '<div style="background:#fff;border-radius:20px;padding:24px 20px;width:300px;max-width:85vw;box-shadow:0 20px 60px rgba(0,0,0,.2);">'
+    +'<div style="text-align:center;margin-bottom:16px;">'
+    +'<div style="font-size:36px;margin-bottom:8px;">📝</div>'
+    +'<div style="font-size:16px;font-weight:800;color:#1a1a1a;">保存当前草稿？</div>'
+    +'<div style="font-size:13px;color:#999;margin-top:6px;">检测到你要切换新商品，当前笔记草稿是否保存到草稿箱？</div>'
+    +'</div>'
+    +'<div style="background:#f8f8f8;border-radius:12px;padding:12px;margin-bottom:16px;">'
+    +'<div style="font-size:12px;font-weight:700;color:#333;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">'+(draftNote&&draftNote.title||'无标题')+'</div>'
+    +'<div style="font-size:11px;color:#999;margin-top:4px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">'+(draftNote&&draftNote.body?draftNote.body.replace(/\n/g,' ').slice(0,60)+'…':'')+'</div>'
+    +'</div>'
+    +'<div style="display:flex;gap:10px;">'
+    +'<button id="draft-discard-btn" style="flex:1;padding:12px;border:none;border-radius:12px;font-size:14px;font-weight:700;background:#f0f0f0;color:#666;cursor:pointer;">不保存</button>'
+    +'<button id="draft-save-btn" style="flex:1;padding:12px;border:none;border-radius:12px;font-size:14px;font-weight:700;background:'+cfg.color+';color:#fff;cursor:pointer;">保存草稿</button>'
+    +'</div>'
+    +'</div>';
+  document.body.appendChild(overlay);
+
+  function _afterConfirm(saved) {
+    overlay.remove();
+    if (saved && draftNote) {
+      saveDraftLocal(role, draftNote, pendingMessage || '');
+    }
+    // 继续发送原始消息（走 confirm_switch 接口或直接重发）
+    if (pendingMessage && zhongshuHasRealBackend()) {
+      var sid = ZHONGSHU_SESSIONS[role];
+      if (sid) {
+        fetch(window.ZHONGSHU_API_BASE + '/api/chat/confirm_switch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id: sid, role: role, message: pendingMessage })
+        }).then(function(r){ return r.json(); }).then(function(reply){
+          var parsed = { from: 'agent', text: reply.text || '', notePreview: reply.note || null };
+          chatHistory[role].push(parsed);
+          refreshChat(role);
+        }).catch(function(){ /* fallback: 重新走流式 */ });
+      }
+    } else if (pendingMessage) {
+      // mock 模式直接生成
+      chatHistory[role].push(mockAgentReply(role, pendingMessage));
+      refreshChat(role);
+    }
+  }
+
+  document.getElementById('draft-discard-btn').onclick = function(){ _afterConfirm(false); };
+  document.getElementById('draft-save-btn').onclick = function(){ _afterConfirm(true); };
+}
 
 // ── 达人「个人品牌管理」模块（仅 KOL 展示） ──
 function renderKolBranding(c, light) {
@@ -4548,14 +4655,49 @@ function renderMine(role) {
     +'</div></div>'
     +'</div></div>'
 
-    // ── Tab 切换栏：历史笔记 / 订单管理 ──
+    // ── Tab 切换栏：历史笔记 / 订单管理 / 草稿箱 ──
     +'<div style="display:flex;align-items:center;margin:0 12px 10px;background:#f5f5f5;border-radius:12px;padding:3px;">'
-    +'<div onclick="switchMineView(\'notes\',\''+role+'\')" style="flex:1;text-align:center;padding:8px 0;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;transition:all .2s;background:'+(mineViewTab==='notes'?'#fff':'transparent')+';color:'+(mineViewTab==='notes'?c:'#999')+';box-shadow:'+(mineViewTab==='notes'?'0 1px 4px rgba(0,0,0,.08)':'none')+';">📝 历史笔记</div>'
-    +'<div onclick="switchMineView(\'orders\',\''+role+'\')" style="flex:1;text-align:center;padding:8px 0;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;transition:all .2s;background:'+(mineViewTab==='orders'?'#fff':'transparent')+';color:'+(mineViewTab==='orders'?c:'#999')+';box-shadow:'+(mineViewTab==='orders'?'0 1px 4px rgba(0,0,0,.08)':'none')+';">📦 订单管理</div>'
+    +'<div onclick="switchMineView(\'notes\',\''+role+'\')" style="flex:1;text-align:center;padding:8px 0;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;transition:all .2s;background:'+(mineViewTab==='notes'?'#fff':'transparent')+';color:'+(mineViewTab==='notes'?c:'#999')+';box-shadow:'+(mineViewTab==='notes'?'0 1px 4px rgba(0,0,0,.08)':'none')+';">📝 历史笔记</div>'
+    +'<div onclick="switchMineView(\'orders\',\''+role+'\')" style="flex:1;text-align:center;padding:8px 0;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;transition:all .2s;background:'+(mineViewTab==='orders'?'#fff':'transparent')+';color:'+(mineViewTab==='orders'?c:'#999')+';box-shadow:'+(mineViewTab==='orders'?'0 1px 4px rgba(0,0,0,.08)':'none')+';">📦 订单管理</div>'
+    +'<div onclick="switchMineView(\'drafts\',\''+role+'\')" style="flex:1;text-align:center;padding:8px 0;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;transition:all .2s;background:'+(mineViewTab==='drafts'?'#fff':'transparent')+';color:'+(mineViewTab==='drafts'?c:'#999')+';box-shadow:'+(mineViewTab==='drafts'?'0 1px 4px rgba(0,0,0,.08)':'none')+';">📥 草稿箱'+(localDrafts[role]&&localDrafts[role].length?' ('+localDrafts[role].length+')':'')+'</div>'
     +'</div>'
 
     // ── 内容区域根据 Tab 切换 ──
-    +(mineViewTab==='notes' ? (function(){
+    +(mineViewTab==='drafts' ? (function(){
+      // ═══ 草稿箱视图 ═══
+      var drafts = localDrafts[role] || [];
+      if (drafts.length === 0) {
+        return '<div style="text-align:center;padding:40px 20px;color:#bbb;">'
+          +'<div style="font-size:40px;margin-bottom:12px;">📥</div>'
+          +'<div style="font-size:14px;font-weight:600;margin-bottom:6px;">草稿箱为空</div>'
+          +'<div style="font-size:12px;">生成笔记后切换商品时可保存草稿到这里</div>'
+          +'</div>';
+      }
+      var html = '<div style="padding:0 16px 8px;font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:space-between;">'
+        +'<span style="color:#666;">共 '+drafts.length+' 篇草稿</span>'
+        +'</div>';
+      drafts.forEach(function(d){
+        var n = d.note || {};
+        var bodyPreview = (n.body || '').replace(/\n/g, ' ').slice(0, 40) + '…';
+        html += '<div style="background:#fff;margin:0 12px 8px;border-radius:14px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,.06);">'
+          +'<div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px;">'
+          +'<div style="width:44px;height:44px;border-radius:10px;background:'+light+';display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;">📝</div>'
+          +'<div style="flex:1;min-width:0;">'
+          +'<div style="font-size:13px;font-weight:700;color:#1a1a1a;line-height:1.4;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">'+(n.title||'无标题草稿')+'</div>'
+          +'<div style="font-size:11px;color:#bbb;margin-top:3px;">'+d.time+(d.product?' · 来源：'+d.product.slice(0,20):'')+'</div>'
+          +'</div>'
+          +'<span style="font-size:11px;padding:3px 8px;border-radius:8px;font-weight:600;flex-shrink:0;background:#fff8ee;color:#ff9500;">草稿</span>'
+          +'</div>'
+          +'<div style="font-size:12px;color:#666;line-height:1.5;margin-bottom:8px;">'+bodyPreview+'</div>'
+          +'<div style="display:flex;gap:8px;justify-content:flex-end;">'
+          +'<div onclick="deleteDraftLocal(\''+role+'\',\''+d.id+'\')" style="font-size:11px;color:#ff4757;cursor:pointer;padding:4px 10px;border-radius:8px;background:#fff0f0;">🗑️ 删除</div>'
+          +'<div onclick="useDraftInChat(\''+role+'\',\''+d.id+'\')" style="font-size:11px;color:'+c+';cursor:pointer;padding:4px 10px;border-radius:8px;background:'+light+';">✏️ 继续编辑</div>'
+          +'</div>'
+          +'</div>';
+      });
+      return html;
+    })()
+    : mineViewTab==='notes' ? (function(){
       // ═══ 历史笔记视图 ═══
       var html = '<div style="padding:0 16px 8px;font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:space-between;">'
         +'<span style="color:#666;">共 '+filtered.length+' 篇</span>'

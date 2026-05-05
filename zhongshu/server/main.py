@@ -468,7 +468,16 @@ class RewriteRequest(BaseModel):
     body: Optional[str] = ""
     tags: Optional[list] = []
     instruction: Optional[str] = ""
-    role: Optional[str] = ""  # 新增：传入角色以保持风格一致
+    role: Optional[str] = ""  # 传入角色以保持风格一致
+    context_messages: Optional[list] = []  # 对话上下文（最近几轮）
+    user_profile: Optional[dict] = {}  # 用户画像
+
+
+class DraftRequest(BaseModel):
+    session_id: str
+    role: str
+    note: dict  # {title, body, tags}
+    product_input: Optional[str] = ""  # 关联的商品输入
 
 
 @app.post("/api/session")
@@ -488,6 +497,7 @@ async def create_session(req: SessionRequest):
         "state": STATE_IDLE,           # 对话状态机
         "user_profile": {},            # 用户画像记忆
         "last_note": None,             # 最近一次生成的笔记（用于改写上下文）
+        "drafts": [],                  # 草稿箱（session 级持久化）
     }
     return {"session_id": session_id}
 
@@ -516,10 +526,12 @@ async def chat(req: ChatRequest):
         fallback_text = random.choice(FALLBACK_RESPONSES)
         return {"text": fallback_text, "note": None, "intent": intent, "state": session["state"]}
 
-    # ④ 改写意图 → 走 rewrite 逻辑
+    # ④ 改写意图 → 走 rewrite 逻辑（带上下文）
     if intent == INTENT_REWRITE and session.get("last_note"):
         session["state"] = STATE_REWRITING
         last = session["last_note"]
+        # 提取最近 6 轮对话作为上下文
+        recent_msgs = [m for m in session["messages"][-6:] if m.get("role") in ("user", "assistant")]
         rewrite_req = RewriteRequest(
             action="rewrite_body",
             title=last.get("title", ""),
@@ -527,6 +539,8 @@ async def chat(req: ChatRequest):
             tags=last.get("tags", []),
             instruction=req.message,
             role=session["role"],
+            context_messages=recent_msgs,
+            user_profile=session.get("user_profile", {}),
         )
         result = await rewrite(rewrite_req)
         # 更新 last_note
@@ -537,8 +551,19 @@ async def chat(req: ChatRequest):
         result["state"] = session["state"]
         return result
 
-    # ⑤ 切换商品 → 重置状态，走生成流程
+    # ⑤ 切换商品 → 先询问是否保存草稿
     if intent == INTENT_SWITCH:
+        has_draft = session.get("last_note") is not None
+        if has_draft:
+            # 返回确认事件，让前端弹窗询问
+            return {
+                "text": "",
+                "note": None,
+                "intent": "confirm_save_draft",
+                "state": session["state"],
+                "pending_message": req.message,  # 前端确认后重新发送
+                "draft_note": session["last_note"],
+            }
         session["state"] = STATE_IDLE
         session["last_note"] = None
 
@@ -648,10 +673,11 @@ async def chat_stream(req: ChatRequest):
             yield sse_event("done", {"full_text": fallback_text})
         return StreamingResponse(fallback_gen(), media_type="text/event-stream")
 
-    # ④ 改写意图
+    # ④ 改写意图（带上下文）
     if intent == INTENT_REWRITE and session.get("last_note"):
         session["state"] = STATE_REWRITING
         last = session["last_note"]
+        recent_msgs = [m for m in session["messages"][-6:] if m.get("role") in ("user", "assistant")]
         async def rewrite_gen():
             yield sse_event("intent", {"intent": intent, "state": session["state"]})
             try:
@@ -662,6 +688,8 @@ async def chat_stream(req: ChatRequest):
                     tags=last.get("tags", []),
                     instruction=req.message,
                     role=session["role"],
+                    context_messages=recent_msgs,
+                    user_profile=session.get("user_profile", {}),
                 )
                 result = await rewrite(rewrite_req)
                 if result.get("note"):
@@ -675,8 +703,16 @@ async def chat_stream(req: ChatRequest):
                 yield sse_event("error", {"message": str(e)})
         return StreamingResponse(rewrite_gen(), media_type="text/event-stream")
 
-    # ⑤ 切换商品
+    # ⑤ 切换商品 → 先询问是否保存草稿
     if intent == INTENT_SWITCH:
+        has_draft = session.get("last_note") is not None
+        if has_draft:
+            async def confirm_gen():
+                yield sse_event("confirm_save_draft", {
+                    "pending_message": req.message,
+                    "draft_note": session["last_note"],
+                })
+            return StreamingResponse(confirm_gen(), media_type="text/event-stream")
         session["state"] = STATE_IDLE
         session["last_note"] = None
 
@@ -834,7 +870,31 @@ async def rewrite(req: RewriteRequest):
     elif req.role == "kol":
         role_style = "\n风格要求：专业测评博主视角，数据说话，理性有说服力。"
 
-    system_msg = f"""你是小红书文案改写专家。直接返回改写结果，不要解释思路，不要输出分析过程。{role_style}
+    # 构建用户画像上下文
+    profile_context = ""
+    if req.user_profile:
+        parts = []
+        if req.user_profile.get("brand_name"):
+            parts.append(f"品牌名：{req.user_profile['brand_name']}")
+        if req.user_profile.get("tone"):
+            parts.append(f"调性：{'、'.join(req.user_profile['tone'][-3:])}")
+        if req.user_profile.get("category"):
+            parts.append(f"品类：{req.user_profile['category']}")
+        if parts:
+            profile_context = "\n用户画像：" + "，".join(parts)
+
+    # 构建对话上下文摘要
+    context_summary = ""
+    if req.context_messages:
+        context_lines = []
+        for msg in req.context_messages[-4:]:  # 最多取最近4条
+            role_label = "用户" if msg.get("role") == "user" else "助手"
+            content = msg.get("content", "")[:80]
+            context_lines.append(f"{role_label}：{content}")
+        if context_lines:
+            context_summary = "\n\n对话上下文（参考，保持连贯性）：\n" + "\n".join(context_lines)
+
+    system_msg = f"""你是小红书文案改写专家。直接返回改写结果，不要解释思路，不要输出分析过程。{role_style}{profile_context}
 
 ██ 绝对禁止 ██
 - 禁止输出 markdown 格式（不许用 ** # ``` 等符号）
@@ -855,13 +915,63 @@ async def rewrite(req: RewriteRequest):
     llm_response = await call_deepseek(
         messages=[
             {"role": "system", "content": system_msg},
-            {"role": "user", "content": prompt},
+            {"role": "user", "content": prompt + context_summary},
         ],
         tools=None,
     )
 
     assistant_text = llm_response["choices"][0]["message"].get("content", "")
     return parse_agent_response(assistant_text)
+
+
+# ── 草稿箱接口 ──────────────────────────────
+@app.post("/api/drafts/save")
+async def save_draft(req: DraftRequest):
+    """保存草稿到草稿箱"""
+    if req.session_id not in sessions:
+        raise HTTPException(404, "会话不存在")
+    session = sessions[req.session_id]
+    draft = {
+        "id": str(uuid.uuid4())[:8],
+        "note": req.note,
+        "product_input": req.product_input,
+        "role": req.role,
+        "saved_at": time.time(),
+    }
+    session["drafts"].insert(0, draft)  # 最新的在前
+    # 最多保留 20 篇草稿
+    session["drafts"] = session["drafts"][:20]
+    return {"ok": True, "draft_id": draft["id"], "total": len(session["drafts"])}
+
+
+@app.get("/api/drafts/{session_id}")
+async def list_drafts(session_id: str):
+    """获取草稿箱列表"""
+    if session_id not in sessions:
+        raise HTTPException(404, "会话不存在")
+    return {"drafts": sessions[session_id].get("drafts", [])}
+
+
+@app.delete("/api/drafts/{session_id}/{draft_id}")
+async def delete_draft(session_id: str, draft_id: str):
+    """删除草稿"""
+    if session_id not in sessions:
+        raise HTTPException(404, "会话不存在")
+    session = sessions[session_id]
+    session["drafts"] = [d for d in session["drafts"] if d["id"] != draft_id]
+    return {"ok": True, "total": len(session["drafts"])}
+
+
+@app.post("/api/chat/confirm_switch")
+async def confirm_switch(req: ChatRequest):
+    """用户确认切换商品后调用（保存/不保存草稿后继续生成）"""
+    if req.session_id not in sessions:
+        raise HTTPException(404, "会话不存在")
+    session = sessions[req.session_id]
+    session["state"] = STATE_IDLE
+    session["last_note"] = None
+    # 重新走正常的 chat 流程
+    return await chat(ChatRequest(session_id=req.session_id, role=req.role, message=req.message))
 
 
 # ── 新增：查询会话状态接口 ──────────────────────────────
