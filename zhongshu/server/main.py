@@ -274,11 +274,18 @@ STATE_REWRITING = "rewriting"    # 正在改写中
 INTENT_GENERATE = "generate"         # 生成新文案（有链接或商品关键词）
 INTENT_REWRITE = "rewrite"           # 改写/优化当前草稿
 INTENT_SWITCH = "switch_product"     # 切换到新商品
+INTENT_GREETING = "greeting"         # 打招呼
 INTENT_IRRELEVANT = "irrelevant"     # 无关话题
+
+# 打招呼关键词（返回欢迎语）
+GREETING_PATTERNS = [
+    r"^你好$", r"^hi$", r"^hello$", r"^嗨$", r"^在吗$", r"^hey$",
+    r"^哈喽$", r"^您好$", r"^在不在$",
+]
 
 # 无关话题关键词（用于快速判断）
 IRRELEVANT_PATTERNS = [
-    r"天气", r"几点了", r"你是谁", r"你好", r"在吗", r"吃了吗",
+    r"天气", r"几点了", r"你是谁", r"吃了吗",
     r"讲个笑话", r"唱首歌", r"今天星期几", r"帮我算", r"翻译",
     r"写代码", r"编程", r"python", r"java", r"数学题",
     r"新闻", r"股票", r"基金", r"天气预报", r"快递",
@@ -320,7 +327,12 @@ def classify_intent(message: str, session: dict) -> str:
     msg = message.strip().lower()
     state = session.get("state", STATE_IDLE)
 
-    # 1. 无关话题检测（最高优先级）
+    # 0. 打招呼检测（最高优先级）
+    for pattern in GREETING_PATTERNS:
+        if re.search(pattern, msg):
+            return INTENT_GREETING
+
+    # 1. 无关话题检测
     # 短消息 + 匹配无关模式 + 没有商品相关内容
     has_url = bool(re.search(r'https?://', message))
     has_product_hint = any(
@@ -424,11 +436,14 @@ def build_system_prompt(role: str, profile: dict) -> str:
     return base_prompt
 
 
-# Fallback 回复（不走 LLM）
+# 欢迎语（打招呼时返回）
+GREETING_RESPONSE = "你好，我是种草笔记助手，告诉我你的选品，让我来帮你快速写出最适合你的笔记吧～ 🌱"
+
+# Fallback 回复（无关话题，不走 LLM）
 FALLBACK_RESPONSES = [
-    "我是种薯文案助手，专注帮你写小红书种草笔记 🌱\n\n发商品链接或描述你的商品，我来帮你生成文案吧！",
     "这个我帮不上忙哦～我的专长是写种草文案 🌱\n\n把商品链接或关键词发给我，马上帮你生成笔记！",
     "我只会写种草笔记哦 🌱 发个商品链接或告诉我你要推什么产品，我来帮你！",
+    "这个问题超出我的能力范围啦～我专注于种草笔记创作 🌱\n\n告诉我你的选品，我来帮你写文案！",
 ]
 
 
@@ -491,7 +506,11 @@ async def chat(req: ChatRequest):
     # ② 意图分类
     intent = classify_intent(req.message, session)
 
-    # ③ Fallback：无关话题直接返回，不走 LLM
+    # ③ 打招呼：返回欢迎语
+    if intent == INTENT_GREETING:
+        return {"text": GREETING_RESPONSE, "note": None, "intent": intent, "state": session["state"]}
+
+    # ③-b Fallback：无关话题直接返回，不走 LLM
     if intent == INTENT_IRRELEVANT:
         import random
         fallback_text = random.choice(FALLBACK_RESPONSES)
@@ -611,7 +630,15 @@ async def chat_stream(req: ChatRequest):
     # ② 意图分类
     intent = classify_intent(req.message, session)
 
-    # ③ Fallback：无关话题
+    # ③ 打招呼：返回欢迎语
+    if intent == INTENT_GREETING:
+        async def greeting_gen():
+            yield sse_event("intent", {"intent": intent, "state": session["state"]})
+            yield sse_event("greeting", {"text": GREETING_RESPONSE})
+            yield sse_event("done", {"full_text": GREETING_RESPONSE})
+        return StreamingResponse(greeting_gen(), media_type="text/event-stream")
+
+    # ③-b Fallback：无关话题
     if intent == INTENT_IRRELEVANT:
         import random
         fallback_text = random.choice(FALLBACK_RESPONSES)
