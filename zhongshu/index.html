@@ -3471,6 +3471,23 @@ function sendMessage(role, text) {
   var area = document.getElementById('chatArea-'+role);
 
   if (zhongshuHasRealBackend()) {
+    // ── 前端本地 greeting/irrelevant 拦截（兜底，防止旧后端不处理） ──
+    var _t = text.trim().toLowerCase();
+    var _greetWords = ['你好','hi','hello','嗨','在吗','hey','早上好','晚上好','下午好','哈喽','您好'];
+    var _isLocalGreeting = _greetWords.some(function(w){ return _t.indexOf(w) >= 0; }) && _t.length < 10;
+    if (_isLocalGreeting) {
+      chatHistory[role].push({ from:'agent', text:'你好呀！我是你的种草文案助手 🌱\n把商品链接或关键词发给我，我来帮你自动分析卖点、生成文案～' });
+      refreshChat(role);
+      return;
+    }
+    var _irrelevantWords = ['天气','新闻','股票','吃什么','几点了','讲个笑话','唱首歌','你是谁','写代码','编程','翻译','数学'];
+    var _isLocalIrrelevant = _irrelevantWords.some(function(w){ return _t.indexOf(w) >= 0; }) && _t.length < 20;
+    if (_isLocalIrrelevant) {
+      chatHistory[role].push({ from:'agent', text:'我专注于帮你写小红书种草文案哦～\n发商品链接或描述产品，我来帮你生成爆款笔记 📝' });
+      refreshChat(role);
+      return;
+    }
+
     // ── 流式模式：先出卡片骨架，逐字填入 ──
     var streamId = 'stream-' + Date.now();
     var liveCardId = 'live-card-' + Date.now();
