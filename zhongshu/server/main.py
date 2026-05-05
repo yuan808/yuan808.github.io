@@ -1,15 +1,18 @@
 """
-种薯 Agent 后端 - 最小可行版
+种薯 Agent 后端 v3.0
 =============================
-功能：
-1. /api/session - 创建会话（按角色维护对话历史）
-2. /api/chat    - 核心对话（LLM + Function Calling + 工具调用）
-3. /api/chat/stream - 流式对话（SSE，逐字输出）
-4. /api/rewrite - 文案改写（标题/正文/标签优化）
+新增能力：
+1. 用户画像记忆（session 级）- 自动提取品牌/品类/调性，注入 prompt
+2. 对话状态机 - idle/generating/reviewing/rewriting 四态流转
+3. 意图路由 - generate/rewrite/switch_product/irrelevant 四类分流
+4. Fallback - 无关话题礼貌拒绝，不走 LLM
 
-工具：
-- fetch_product_info: 抓取商品链接，提取名称/价格/卖点
-- search_trending_tags: 搜索小红书热门话题标签
+原有能力保持：
+- /api/session - 创建会话
+- /api/chat/stream - 流式对话（SSE）
+- /api/chat - 非流式对话（兼容）
+- /api/rewrite - 文案改写
+- Function Calling: fetch_product_info / search_trending_tags
 
 部署：
   pip install -r requirements.txt
@@ -40,7 +43,7 @@ DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
 MODEL = "deepseek-chat"  # DeepSeek-V3，支持 function calling
 
-app = FastAPI(title="种薯 Agent API", version="2.0.0")
+app = FastAPI(title="种薯 Agent API", version="3.0.0")
 
 # CORS - 允许前端跨域调用
 app.add_middleware(
@@ -54,7 +57,9 @@ app.add_middleware(
 # ══════════════════════════════════════════════════════════════
 # 会话存储（内存，重启丢失；生产环境用 Redis）
 # ══════════════════════════════════════════════════════════════
-sessions: dict = {}  # session_id -> {role, messages, created_at}
+sessions: dict = {}  # session_id -> SessionData
+
+
 
 
 # ══════════════════════════════════════════════════════════════
@@ -242,7 +247,193 @@ def sse_event(event: str, data: dict) -> str:
 
 
 # ══════════════════════════════════════════════════════════════
-# API 接口
+# 消息窗口管理（防止 context window 溢出）
+# ══════════════════════════════════════════════════════════════
+MAX_MESSAGES = 20  # 最多保留最近 20 条消息（约 10 轮对话）
+
+
+def trim_messages(messages: list) -> list:
+    """保留 system prompt + 最近 N 条消息，防止超出 context window"""
+    if len(messages) <= MAX_MESSAGES + 1:  # +1 for system prompt
+        return messages
+    # 保留第一条 system prompt + 最近 MAX_MESSAGES 条
+    return [messages[0]] + messages[-(MAX_MESSAGES):]
+
+
+# ══════════════════════════════════════════════════════════════
+# 意图分类 + 状态机 + 记忆
+# ══════════════════════════════════════════════════════════════
+
+# 对话状态定义
+STATE_IDLE = "idle"              # 等待用户输入新商品
+STATE_GENERATING = "generating"  # 正在生成文案
+STATE_REVIEWING = "reviewing"    # 用户正在看草稿
+STATE_REWRITING = "rewriting"    # 正在改写中
+
+# 意图分类
+INTENT_GENERATE = "generate"         # 生成新文案（有链接或商品关键词）
+INTENT_REWRITE = "rewrite"           # 改写/优化当前草稿
+INTENT_SWITCH = "switch_product"     # 切换到新商品
+INTENT_IRRELEVANT = "irrelevant"     # 无关话题
+
+# 无关话题关键词（用于快速判断）
+IRRELEVANT_PATTERNS = [
+    r"天气", r"几点了", r"你是谁", r"你好", r"在吗", r"吃了吗",
+    r"讲个笑话", r"唱首歌", r"今天星期几", r"帮我算", r"翻译",
+    r"写代码", r"编程", r"python", r"java", r"数学题",
+    r"新闻", r"股票", r"基金", r"天气预报", r"快递",
+]
+
+# 改写意图关键词
+REWRITE_KEYWORDS = [
+    "改写", "换个说法", "优化", "修改", "润色", "重写",
+    "换个风格", "更有吸引力", "更口语", "更专业", "更年轻",
+    "标题换", "正文改", "标签换", "再来一版", "不太满意",
+    "太长了", "太短了", "换个角度", "加点", "去掉",
+    "更活泼", "更高级", "更接地气",
+]
+
+# 品牌调性关键词库
+TONE_KEYWORDS = [
+    "高端", "年轻", "国潮", "极简", "专业", "轻奢",
+    "平价", "学生", "少女", "成熟", "商务", "运动",
+    "自然", "科技", "温柔", "酷", "潮", "复古",
+    "日系", "韩系", "欧美", "中式", "小众", "大牌",
+]
+
+# 品类关键词库
+CATEGORY_KEYWORDS = {
+    "美妆护肤": ["护肤", "美妆", "精华", "面膜", "防晒", "粉底", "口红", "眼影", "卸妆", "洁面", "乳液", "面霜", "化妆"],
+    "食品饮料": ["零食", "饮料", "咖啡", "茶", "奶茶", "酒", "保健", "代餐", "坚果", "巧克力"],
+    "数码家电": ["耳机", "手机", "电脑", "平板", "相机", "音箱", "充电", "键盘", "鼠标", "显示器"],
+    "服饰鞋包": ["衣服", "裤子", "裙子", "鞋", "包", "帽子", "袜子", "内衣", "外套", "T恤"],
+    "家居生活": ["家居", "收纳", "清洁", "香薰", "床品", "厨具", "餐具", "灯", "花", "绿植"],
+    "母婴宠物": ["宝宝", "婴儿", "奶粉", "纸尿裤", "猫", "狗", "宠物", "猫粮", "狗粮"],
+}
+
+
+def classify_intent(message: str, session: dict) -> str:
+    """
+    规则意图分类器
+    优先级：irrelevant > switch_product > rewrite > generate
+    """
+    msg = message.strip().lower()
+    state = session.get("state", STATE_IDLE)
+
+    # 1. 无关话题检测（最高优先级）
+    # 短消息 + 匹配无关模式 + 没有商品相关内容
+    has_url = bool(re.search(r'https?://', message))
+    has_product_hint = any(
+        kw in msg for cat_kws in CATEGORY_KEYWORDS.values() for kw in cat_kws
+    )
+
+    if not has_url and not has_product_hint and len(msg) < 20:
+        for pattern in IRRELEVANT_PATTERNS:
+            if re.search(pattern, msg):
+                return INTENT_IRRELEVANT
+
+    # 2. 有链接 → 如果当前在 reviewing 状态，说明是切换新商品
+    if has_url:
+        if state == STATE_REVIEWING:
+            return INTENT_SWITCH
+        return INTENT_GENERATE
+
+    # 3. 改写意图检测（在 reviewing 状态下优先）
+    if state == STATE_REVIEWING:
+        for kw in REWRITE_KEYWORDS:
+            if kw in msg:
+                return INTENT_REWRITE
+
+    # 4. 有商品关键词 → 生成或切换
+    if has_product_hint:
+        if state == STATE_REVIEWING:
+            return INTENT_SWITCH
+        return INTENT_GENERATE
+
+    # 5. 在 idle 状态下，任何像商品描述的输入都当作生成
+    if state == STATE_IDLE and len(msg) >= 2:
+        # 排除纯改写指令
+        is_rewrite = any(kw in msg for kw in REWRITE_KEYWORDS)
+        if not is_rewrite:
+            return INTENT_GENERATE
+
+    # 6. 在 reviewing 状态下的模糊输入，默认当改写
+    if state == STATE_REVIEWING:
+        return INTENT_REWRITE
+
+    # 7. 兜底
+    return INTENT_GENERATE
+
+
+def extract_user_profile(message: str, profile: dict) -> dict:
+    """
+    从用户消息中提取品牌/品类/调性信息，累积更新 profile
+    profile 结构: {brand_name, tone, category, products}
+    """
+    msg = message.strip()
+
+    # 提取品牌名（简单规则："我是XX品牌" / "品牌叫XX" / "XX品牌"）
+    brand_patterns = [
+        r"(?:我是|我们是|品牌(?:叫|是|名[叫是]?))\s*[「「\"']?([\u4e00-\u9fa5A-Za-z0-9]{2,10})[」」\"']?",
+        r"[「「\"']([\u4e00-\u9fa5A-Za-z0-9]{2,10})[」」\"']\s*(?:品牌|旗舰|官方)",
+    ]
+    for pattern in brand_patterns:
+        m = re.search(pattern, msg)
+        if m:
+            profile["brand_name"] = m.group(1)
+            break
+
+    # 提取调性关键词
+    for tone in TONE_KEYWORDS:
+        if tone in msg and tone not in profile.get("tone", []):
+            profile.setdefault("tone", []).append(tone)
+
+    # 提取品类
+    for category, keywords in CATEGORY_KEYWORDS.items():
+        if any(kw in msg for kw in keywords):
+            profile["category"] = category
+            break
+
+    # 记录商品关键词（最近的输入）
+    if len(msg) > 2 and not any(kw in msg.lower() for kw in REWRITE_KEYWORDS):
+        profile["last_product_input"] = msg[:100]
+
+    return profile
+
+
+def build_system_prompt(role: str, profile: dict) -> str:
+    """
+    基于角色 + 用户画像动态构建 system prompt
+    """
+    base_prompt = SYSTEM_PROMPTS[role]
+
+    # 拼接用户画像上下文
+    context_parts = []
+    if profile.get("brand_name"):
+        context_parts.append(f"用户的品牌名是「{profile['brand_name']}」，文案中必须体现该品牌。")
+    if profile.get("tone"):
+        tone_str = "、".join(profile["tone"][-5:])  # 最多保留5个
+        context_parts.append(f"品牌调性关键词：{tone_str}，文案风格必须匹配这些调性。")
+    if profile.get("category"):
+        context_parts.append(f"商品品类：{profile['category']}。")
+
+    if context_parts:
+        context_block = "\n\n██ 用户画像（必须遵守） ██\n" + "\n".join(context_parts)
+        return base_prompt + context_block
+
+    return base_prompt
+
+
+# Fallback 回复（不走 LLM）
+FALLBACK_RESPONSES = [
+    "我是种薯文案助手，专注帮你写小红书种草笔记 🌱\n\n发商品链接或描述你的商品，我来帮你生成文案吧！",
+    "这个我帮不上忙哦～我的专长是写种草文案 🌱\n\n把商品链接或关键词发给我，马上帮你生成笔记！",
+    "我只会写种草笔记哦 🌱 发个商品链接或告诉我你要推什么产品，我来帮你！",
+]
+
+
+# ══════════════════════════════════════════════════════════════
+# API 接口（重构版）
 # ══════════════════════════════════════════════════════════════
 
 class SessionRequest(BaseModel):
@@ -262,6 +453,7 @@ class RewriteRequest(BaseModel):
     body: Optional[str] = ""
     tags: Optional[list] = []
     instruction: Optional[str] = ""
+    role: Optional[str] = ""  # 新增：传入角色以保持风格一致
 
 
 @app.post("/api/session")
@@ -278,17 +470,70 @@ async def create_session(req: SessionRequest):
             {"role": "system", "content": SYSTEM_PROMPTS[req.role]}
         ],
         "created_at": time.time(),
+        "state": STATE_IDLE,           # 对话状态机
+        "user_profile": {},            # 用户画像记忆
+        "last_note": None,             # 最近一次生成的笔记（用于改写上下文）
     }
     return {"session_id": session_id}
 
 
-# ── 原有非流式接口（保持兼容） ──────────────────────────────
+# ── 非流式接口（保持兼容） ──────────────────────────────
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
     if req.session_id not in sessions:
         raise HTTPException(404, "会话不存在或已过期，请重新创建")
 
     session = sessions[req.session_id]
+
+    # ① 提取用户画像
+    session["user_profile"] = extract_user_profile(req.message, session.get("user_profile", {}))
+
+    # ② 意图分类
+    intent = classify_intent(req.message, session)
+
+    # ③ Fallback：无关话题直接返回，不走 LLM
+    if intent == INTENT_IRRELEVANT:
+        import random
+        fallback_text = random.choice(FALLBACK_RESPONSES)
+        return {"text": fallback_text, "note": None, "intent": intent, "state": session["state"]}
+
+    # ④ 改写意图 → 走 rewrite 逻辑
+    if intent == INTENT_REWRITE and session.get("last_note"):
+        session["state"] = STATE_REWRITING
+        last = session["last_note"]
+        rewrite_req = RewriteRequest(
+            action="rewrite_body",
+            title=last.get("title", ""),
+            body=last.get("body", ""),
+            tags=last.get("tags", []),
+            instruction=req.message,
+            role=session["role"],
+        )
+        result = await rewrite(rewrite_req)
+        # 更新 last_note
+        if result.get("note"):
+            session["last_note"] = result["note"]
+        session["state"] = STATE_REVIEWING
+        result["intent"] = intent
+        result["state"] = session["state"]
+        return result
+
+    # ⑤ 切换商品 → 重置状态，走生成流程
+    if intent == INTENT_SWITCH:
+        session["state"] = STATE_IDLE
+        session["last_note"] = None
+
+    # ⑥ 生成文案 → 走 tool calling 流程
+    session["state"] = STATE_GENERATING
+
+    # 动态更新 system prompt（注入用户画像）
+    session["messages"][0] = {
+        "role": "system",
+        "content": build_system_prompt(session["role"], session["user_profile"])
+    }
+
+    # 消息窗口截断
+    session["messages"] = trim_messages(session["messages"])
     session["messages"].append({"role": "user", "content": req.message})
 
     max_tool_rounds = 5
@@ -324,15 +569,29 @@ async def chat(req: ChatRequest):
     else:
         assistant_text = "抱歉，处理过程太复杂了，请简化你的需求再试一次。"
 
-    return parse_agent_response(assistant_text)
+    parsed = parse_agent_response(assistant_text)
+
+    # 更新状态和记忆
+    if parsed.get("note"):
+        session["last_note"] = parsed["note"]
+        session["state"] = STATE_REVIEWING
+    else:
+        session["state"] = STATE_IDLE
+
+    parsed["intent"] = intent
+    parsed["state"] = session["state"]
+    return parsed
 
 
-# ── 新增：流式对话接口（SSE） ──────────────────────────────
+# ── 流式对话接口（SSE） ──────────────────────────────
 @app.post("/api/chat/stream")
 async def chat_stream(req: ChatRequest):
     """
     流式对话接口 - SSE (Server-Sent Events)
-    事件类型:
+    新增事件:
+    - intent:     意图分类结果 {intent, state}
+    - fallback:   无关话题回复 {text}
+    原有事件:
     - tool_start: 开始调用工具 {name, args}
     - tool_done:  工具调用完成 {name, result_preview}
     - delta:      文本增量 {content}
@@ -345,11 +604,73 @@ async def chat_stream(req: ChatRequest):
         return StreamingResponse(error_gen(), media_type="text/event-stream")
 
     session = sessions[req.session_id]
+
+    # ① 提取用户画像
+    session["user_profile"] = extract_user_profile(req.message, session.get("user_profile", {}))
+
+    # ② 意图分类
+    intent = classify_intent(req.message, session)
+
+    # ③ Fallback：无关话题
+    if intent == INTENT_IRRELEVANT:
+        import random
+        fallback_text = random.choice(FALLBACK_RESPONSES)
+        async def fallback_gen():
+            yield sse_event("intent", {"intent": intent, "state": session["state"]})
+            yield sse_event("fallback", {"text": fallback_text})
+            yield sse_event("done", {"full_text": fallback_text})
+        return StreamingResponse(fallback_gen(), media_type="text/event-stream")
+
+    # ④ 改写意图
+    if intent == INTENT_REWRITE and session.get("last_note"):
+        session["state"] = STATE_REWRITING
+        last = session["last_note"]
+        async def rewrite_gen():
+            yield sse_event("intent", {"intent": intent, "state": session["state"]})
+            try:
+                rewrite_req = RewriteRequest(
+                    action="rewrite_body",
+                    title=last.get("title", ""),
+                    body=last.get("body", ""),
+                    tags=last.get("tags", []),
+                    instruction=req.message,
+                    role=session["role"],
+                )
+                result = await rewrite(rewrite_req)
+                if result.get("note"):
+                    session["last_note"] = result["note"]
+                session["state"] = STATE_REVIEWING
+                # 把改写结果作为完整 JSON 一次性发出
+                full_text = json.dumps(result, ensure_ascii=False)
+                yield sse_event("delta", {"content": full_text})
+                yield sse_event("done", {"full_text": full_text})
+            except Exception as e:
+                yield sse_event("error", {"message": str(e)})
+        return StreamingResponse(rewrite_gen(), media_type="text/event-stream")
+
+    # ⑤ 切换商品
+    if intent == INTENT_SWITCH:
+        session["state"] = STATE_IDLE
+        session["last_note"] = None
+
+    # ⑥ 生成文案 → 走 tool calling + 流式
+    session["state"] = STATE_GENERATING
+
+    # 动态更新 system prompt
+    session["messages"][0] = {
+        "role": "system",
+        "content": build_system_prompt(session["role"], session["user_profile"])
+    }
+
+    session["messages"] = trim_messages(session["messages"])
     session["messages"].append({"role": "user", "content": req.message})
 
     async def stream_generator() -> AsyncGenerator[str, None]:
         try:
-            # Phase 1: Agent 工具调用循环（非流式，但发事件通知前端）
+            # 发送意图事件
+            yield sse_event("intent", {"intent": intent, "state": session["state"]})
+
+            # Phase 1: Agent 工具调用循环
             max_tool_rounds = 5
             for _ in range(max_tool_rounds):
                 llm_response = await call_deepseek(
@@ -361,14 +682,13 @@ async def chat_stream(req: ChatRequest):
                 message = choice["message"]
 
                 if not message.get("tool_calls"):
-                    break  # 没有工具调用，进入流式生成阶段
+                    break
 
                 session["messages"].append(message)
                 for tool_call in message["tool_calls"]:
                     func_name = tool_call["function"]["name"]
                     func_args = json.loads(tool_call["function"]["arguments"])
 
-                    # 通知前端：开始调用工具
                     yield sse_event("tool_start", {
                         "name": func_name,
                         "args": func_args,
@@ -386,7 +706,6 @@ async def chat_stream(req: ChatRequest):
                         "content": result,
                     })
 
-                    # 通知前端：工具调用完成
                     yield sse_event("tool_done", {
                         "name": func_name,
                         "result_preview": result[:100],
@@ -402,7 +721,7 @@ async def chat_stream(req: ChatRequest):
                 payload = {
                     "model": MODEL,
                     "messages": session["messages"],
-                    "temperature": 0.8,
+                    "temperature": 0.7,
                     "max_tokens": 2000,
                     "stream": True,
                 }
@@ -441,7 +760,14 @@ async def chat_stream(req: ChatRequest):
             # 保存到会话历史
             session["messages"].append({"role": "assistant", "content": full_text})
 
-            # 发送完成事件（包含完整文本，前端用于最终解析笔记结构）
+            # 更新状态和记忆
+            parsed = parse_agent_response(full_text)
+            if parsed.get("note"):
+                session["last_note"] = parsed["note"]
+                session["state"] = STATE_REVIEWING
+            else:
+                session["state"] = STATE_IDLE
+
             yield sse_event("done", {"full_text": full_text})
 
         except Exception as e:
@@ -453,7 +779,7 @@ async def chat_stream(req: ChatRequest):
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",  # 禁止 Nginx/Render 代理缓冲
+            "X-Accel-Buffering": "no",
         },
     )
 
@@ -472,7 +798,16 @@ async def rewrite(req: RewriteRequest):
     if not prompt:
         raise HTTPException(400, f"不支持的改写动作：{req.action}")
 
-    system_msg = """你是小红书文案改写专家。直接返回改写结果，不要解释思路，不要输出分析过程。
+    # 根据角色注入风格约束
+    role_style = ""
+    if req.role == "brand":
+        role_style = "\n风格要求：高级感文案，品牌背书，语气自信克制。"
+    elif req.role == "seller":
+        role_style = "\n风格要求：闺蜜安利口吻，亲切真实，有'姐妹冲'的感觉。"
+    elif req.role == "kol":
+        role_style = "\n风格要求：专业测评博主视角，数据说话，理性有说服力。"
+
+    system_msg = f"""你是小红书文案改写专家。直接返回改写结果，不要解释思路，不要输出分析过程。{role_style}
 
 ██ 绝对禁止 ██
 - 禁止输出 markdown 格式（不许用 ** # ``` 等符号）
@@ -488,7 +823,7 @@ async def rewrite(req: RewriteRequest):
 5. 单句改写时（rewrite_sentence）：只返回一句话放在body里，≤20字，绝对不要扩写成多句
 
 输出格式：
-{"text":"","note":{"title":"改后标题","body":"改后正文","tags":["#标签1","#标签2"]}}"""
+{{"text":"","note":{{"title":"改后标题","body":"改后正文","tags":["#标签1","#标签2"]}}}}"""
 
     llm_response = await call_deepseek(
         messages=[
@@ -502,6 +837,20 @@ async def rewrite(req: RewriteRequest):
     return parse_agent_response(assistant_text)
 
 
+# ── 新增：查询会话状态接口 ──────────────────────────────
+@app.get("/api/session/{session_id}/state")
+async def get_session_state(session_id: str):
+    """查询会话当前状态和用户画像"""
+    if session_id not in sessions:
+        raise HTTPException(404, "会话不存在")
+    session = sessions[session_id]
+    return {
+        "state": session.get("state", STATE_IDLE),
+        "user_profile": session.get("user_profile", {}),
+        "has_draft": session.get("last_note") is not None,
+    }
+
+
 # ══════════════════════════════════════════════════════════════
 # LLM 调用（非流式，用于工具调用阶段）
 # ══════════════════════════════════════════════════════════════
@@ -512,7 +861,7 @@ async def call_deepseek(messages: list, tools: Optional[list] = None, stream: bo
     payload = {
         "model": MODEL,
         "messages": messages,
-        "temperature": 0.8,
+        "temperature": 0.7,
         "max_tokens": 2000,
     }
     if tools:
@@ -583,12 +932,15 @@ if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
     print(f"""
 ╔══════════════════════════════════════════════════╗
-║  🌱 种薯 Agent 后端已启动                        ║
+║  🌱 种薯 Agent v3.0 已启动                       ║
 ║  地址: http://localhost:{port}                    ║
 ║  文档: http://localhost:{port}/docs               ║
 ║                                                  ║
-║  前端连接方式:                                    ║
-║  打开 zhongshu/index.html?api=http://localhost:{port} ║
+║  新增能力:                                        ║
+║  · 用户画像记忆（品牌/品类/调性）                  ║
+║  · 对话状态机（idle/generating/reviewing）         ║
+║  · 意图路由（generate/rewrite/fallback）          ║
+║  · 无关话题自动拒绝                               ║
 ╚══════════════════════════════════════════════════╝
 """)
     uvicorn.run(app, host="0.0.0.0", port=port)

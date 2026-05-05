@@ -4379,11 +4379,16 @@ function renderMine(role) {
       {i:'💎',t:'香氛新品上市，这个味道太绝了',cat:'香氛',date:'03-20',status:'草稿',views:'',likes:'',comments:'',sales:'',extra:''},
     ],
     seller:[
-      {i:'💰',t:'这款防晒喷雾真的绝了！回购第三瓶',cat:'护肤',date:'04-15',status:'已发布',views:'2,800',likes:'234',comments:'56',sales:'18单',extra:'转化率7.7%'},
-      {i:'📦',t:'胶原蛋白面膜开箱，用完一盒的真实感受',cat:'护肤',date:'04-08',status:'已发布',views:'1,900',likes:'167',comments:'43',sales:'12单',extra:'转化率6.3%'},
-      {i:'🔄',t:'用了30天，皮肤真的变了！前后对比',cat:'护肤',date:'04-01',status:'已发布',views:'3,400',likes:'289',comments:'78',sales:'24单',extra:'转化率8.1%'},
-      {i:'🎯',t:'宿舍护肤必备！这5件单品素颜也好看',cat:'护肤',date:'03-25',status:'已发布',views:'4,100',likes:'356',comments:'94',sales:'31单',extra:'转化率9.2%'},
-      {i:'🛒',t:'香氛身体乳开箱，夏天必备好物',cat:'香氛',date:'03-18',status:'草稿',views:'',likes:'',comments:'',sales:'',extra:''},
+      {i:'💰',t:'这款防晒喷雾真的绝了！回购第三瓶',cat:'护肤',date:'04-15',status:'已发布',views:'2,800',likes:'234',comments:'56',sales:'18单',conv:'7.7%'},
+      {i:'📦',t:'胶原蛋白面膜开箱，用完一盒的真实感受',cat:'护肤',date:'04-08',status:'已发布',views:'1,900',likes:'167',comments:'43',sales:'12单',conv:'6.3%'},
+      {i:'🔄',t:'用了30天，皮肤真的变了！前后对比',cat:'护肤',date:'04-01',status:'已发布',views:'3,400',likes:'289',comments:'78',sales:'24单',conv:'8.1%'},
+      {i:'🎯',t:'宿舍护肤必备！这5件单品素颜也好看',cat:'护肤',date:'03-25',status:'已发布',views:'4,100',likes:'356',comments:'94',sales:'31单',conv:'9.2%'},
+      {i:'🧴',t:'氨基酸洁面慕斯，温和不紧绷',cat:'护肤',date:'03-15',status:'已发布',views:'2,200',likes:'178',comments:'38',sales:'15单',conv:'6.8%'},
+      {i:'💄',t:'这支口红也太显白了！黄皮救星',cat:'彩妆',date:'04-12',status:'已发布',views:'3,600',likes:'298',comments:'72',sales:'22单',conv:'7.2%'},
+      {i:'🌸',t:'春夏必备腮红盘，日杂感妆容教程',cat:'彩妆',date:'04-02',status:'已发布',views:'2,100',likes:'189',comments:'45',sales:'9单',conv:'4.3%'},
+      {i:'🌿',t:'香氛身体乳开箱，夏天必备好物',cat:'香氛',date:'03-18',status:'已发布',views:'1,800',likes:'145',comments:'32',sales:'8单',conv:'5.1%'},
+      {i:'👗',t:'通勤穿搭分享，这几件百搭又显瘦',cat:'服饰',date:'04-10',status:'已发布',views:'2,500',likes:'210',comments:'55',sales:'14单',conv:'6.0%'},
+      {i:'👜',t:'平价包包合集，学生党也能拥有质感',cat:'服饰',date:'03-28',status:'已发布',views:'3,000',likes:'267',comments:'61',sales:'19单',conv:'7.5%'},
     ],
     kol:[
       {i:'💫',t:'护肤日记 Vol.12 | 最近在用的宝藏单品',cat:'护肤',date:'04-16',status:'已发布',views:'6,400',likes:'512',comments:'143',sales:'商单¥2,000',extra:'互动率8.0%'},
@@ -4527,15 +4532,96 @@ function renderMine(role) {
     +'</div></div>'
     +'</div></div>'
 
-    // ── 历史笔记列表 ──
-    +'<div style="padding:0 16px 8px;font-size:15px;font-weight:700;display:flex;align-items:center;justify-content:space-between;">'
+    // ── seller: 订单管理（按品类分组） / 其他角色: 历史笔记 ──
+    +(role==='seller' ? (function(){
+      // 按品类分组
+      var catOrder = ['护肤','彩妆','香氛','服饰'];
+      var grouped = {};
+      catOrder.forEach(function(cat){ grouped[cat] = []; });
+      filtered.forEach(function(n){ if(grouped[n.cat]) grouped[n.cat].push(n); });
+
+      // 品类汇总数据（mock）
+      var catSummary = {
+        '护肤': {icon:'🧴',totalSales:'100单',gmv:'¥14,900',avgConv:'7.6%',trend:'+12%',up:true},
+        '彩妆': {icon:'💄',totalSales:'31单',gmv:'¥4,650',avgConv:'5.8%',trend:'+5%',up:true},
+        '香氛': {icon:'🌿',totalSales:'8单',gmv:'¥1,120',avgConv:'5.1%',trend:'-2%',up:false},
+        '服饰': {icon:'👗',totalSales:'33单',gmv:'¥4,620',avgConv:'6.8%',trend:'+8%',up:true}
+      };
+
+      // 如果筛选了品类，只展示该品类
+      var displayCats = mineFilter.cat==='全部' ? catOrder : catOrder.filter(function(cat){ return cat===mineFilter.cat; });
+
+      var totalNotes = filtered.length;
+      var totalSalesNum = 0;
+      filtered.forEach(function(n){ if(n.sales) totalSalesNum += parseInt(n.sales); });
+
+      var html = '';
+      // 标题
+      html += '<div style="padding:0 16px 8px;font-size:15px;font-weight:700;display:flex;align-items:center;justify-content:space-between;">'
+        +'<span>📦 订单管理</span>'
+        +'<span style="font-size:12px;color:#999;">'+displayCats.length+' 个品类 · '+totalNotes+' 篇笔记</span>'
+        +'</div>';
+
+      // 按品类遍历
+      displayCats.forEach(function(cat){
+        var catNotes = grouped[cat];
+        var summary = catSummary[cat];
+        if(!catNotes || catNotes.length===0) return;
+
+        // 品类卡片
+        html += '<div style="background:#fff;margin:0 12px 12px;border-radius:14px;box-shadow:0 1px 4px rgba(0,0,0,.06);overflow:hidden;">';
+        // 品类头部：图标 + 名称 + 销售概况
+        html += '<div style="padding:14px 14px 10px;border-bottom:1px solid #f5f5f5;">'
+          +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">'
+          +'<div style="display:flex;align-items:center;gap:8px;">'
+          +'<span style="font-size:20px;">'+summary.icon+'</span>'
+          +'<span style="font-size:14px;font-weight:800;color:#1a1a1a;">'+cat+'</span>'
+          +'<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:'+light+';color:'+c+';font-weight:600;">在售</span>'
+          +'</div>'
+          +'<span style="font-size:11px;font-weight:700;color:'+(summary.up?'#00b894':'#ff2442')+';">'+(summary.up?'↑':'↓')+summary.trend+'</span>'
+          +'</div>';
+        // 品类销售数据行
+        html += '<div style="display:flex;gap:0;">'
+          +'<div style="flex:1;text-align:center;border-right:1px solid #f5f5f5;">'
+          +'<div style="font-size:14px;font-weight:800;color:'+c+';">'+summary.totalSales+'</div>'
+          +'<div style="font-size:10px;color:#bbb;margin-top:2px;">总销量</div></div>'
+          +'<div style="flex:1;text-align:center;border-right:1px solid #f5f5f5;">'
+          +'<div style="font-size:14px;font-weight:800;color:'+c+';">'+summary.gmv+'</div>'
+          +'<div style="font-size:10px;color:#bbb;margin-top:2px;">GMV</div></div>'
+          +'<div style="flex:1;text-align:center;">'
+          +'<div style="font-size:14px;font-weight:800;color:'+c+';">'+summary.avgConv+'</div>'
+          +'<div style="font-size:10px;color:#bbb;margin-top:2px;">平均转化率</div></div>'
+          +'</div></div>';
+
+        // 关联笔记列表
+        html += '<div style="padding:10px 14px 6px;">'
+          +'<div style="font-size:11px;color:#999;margin-bottom:8px;">关联笔记 ('+catNotes.length+')</div>';
+        catNotes.forEach(function(n){
+          html += '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #fafafa;cursor:pointer;" onclick="showNoteDetail()">'
+            +'<div style="width:36px;height:36px;border-radius:8px;background:'+light+';display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;">'+n.i+'</div>'
+            +'<div style="flex:1;min-width:0;">'
+            +'<div style="font-size:12px;font-weight:700;color:#1a1a1a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+n.t+'</div>'
+            +'<div style="font-size:10px;color:#bbb;margin-top:2px;">'+n.date+' · 曝光 '+n.views+' · 点赞 '+n.likes+' · 评论 '+n.comments+'</div>'
+            +'</div>'
+            +'<div style="text-align:right;flex-shrink:0;">'
+            +'<div style="font-size:13px;font-weight:800;color:'+c+';">'+n.sales+'</div>'
+            +'<div style="font-size:10px;color:#999;margin-top:1px;">转化 '+n.conv+'</div>'
+            +'</div>'
+            +'</div>';
+        });
+        html += '</div></div>';
+      });
+
+      return html;
+    })()
+    : // 非 seller 角色保持原有历史笔记列表
+    '<div style="padding:0 16px 8px;font-size:15px;font-weight:700;display:flex;align-items:center;justify-content:space-between;">'
     +'<span>📝 历史笔记</span>'
     +'<span style="font-size:12px;color:#999;">共 '+filtered.length+' 篇</span>'
     +'</div>'
     +filtered.map(function(n){
       var isPub = n.status==='已发布';
       return '<div style="background:#fff;margin:0 12px 8px;border-radius:14px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,.06);cursor:pointer;" onclick="showNoteDetail()">'
-        // 第一行：缩略图 + 标题 + 状态
         +'<div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px;">'
         +'<div style="width:44px;height:44px;border-radius:10px;background:'+light+';display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;">'+n.i+'</div>'
         +'<div style="flex:1;min-width:0;">'
@@ -4544,26 +4630,21 @@ function renderMine(role) {
         +'</div>'
         +'<span style="font-size:11px;padding:3px 8px;border-radius:8px;font-weight:600;flex-shrink:0;background:'+(isPub?'#e8f5e9':'#f5f5f5')+';color:'+(isPub?'#2e7d32':'#999')+';">'+n.status+'</span>'
         +'</div>'
-        // 第二行：数据指标
         +(isPub
           ? '<div style="display:flex;gap:0;border-top:1px solid #f5f5f5;padding-top:8px;">'
             +'<div style="flex:1;text-align:center;border-right:1px solid #f5f5f5;">'
             +'<div style="font-size:13px;font-weight:700;color:#1a1a1a;">'+n.views+'</div>'
-            +'<div style="font-size:10px;color:#bbb;margin-top:1px;">曝光</div>'
-            +'</div>'
+            +'<div style="font-size:10px;color:#bbb;margin-top:1px;">曝光</div></div>'
             +'<div style="flex:1;text-align:center;border-right:1px solid #f5f5f5;">'
             +'<div style="font-size:13px;font-weight:700;color:#1a1a1a;">'+n.likes+'</div>'
-            +'<div style="font-size:10px;color:#bbb;margin-top:1px;">点赞</div>'
-            +'</div>'
+            +'<div style="font-size:10px;color:#bbb;margin-top:1px;">点赞</div></div>'
             +'<div style="flex:1;text-align:center;'+(n.sales?'border-right:1px solid #f5f5f5;':'')+'">'
             +'<div style="font-size:13px;font-weight:700;color:#1a1a1a;">'+n.comments+'</div>'
-            +'<div style="font-size:10px;color:#bbb;margin-top:1px;">评论</div>'
-            +'</div>'
+            +'<div style="font-size:10px;color:#bbb;margin-top:1px;">评论</div></div>'
             +(n.sales
               ? '<div style="flex:1;text-align:center;">'
                 +'<div style="font-size:13px;font-weight:700;color:'+c+';">'+n.sales+'</div>'
-                +'<div style="font-size:10px;color:#bbb;margin-top:1px;">'+(role==='kol'?'收入':'销售')+'</div>'
-                +'</div>'
+                +'<div style="font-size:10px;color:#bbb;margin-top:1px;">'+(role==='kol'?'收入':'销售')+'</div></div>'
               : '')
             +'</div>'
             +(n.extra?'<div style="margin-top:6px;font-size:11px;color:'+c+';font-weight:600;padding:4px 8px;background:'+light+';border-radius:6px;display:inline-block;">'+n.extra+'</div>':'')
@@ -4571,31 +4652,10 @@ function renderMine(role) {
         )
         +'</div>';
     }).join('')
+    )
 
-    // ── 销售情况汇总（卖家/达人专属） ──
-    +(role==='seller'
-      ? '<div style="padding:4px 16px 8px;font-size:15px;font-weight:700;">💹 销售情况汇总</div>'
-        +'<div style="background:#fff;margin:0 12px 10px;border-radius:14px;padding:14px;box-shadow:0 1px 4px rgba(0,0,0,.06);">'
-        +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">'
-        +'<span style="font-size:13px;font-weight:700;">本月销售趋势</span>'
-        +'<span style="font-size:11px;color:#00b894;font-weight:700;">总计 85单 ↑23%</span>'
-        +'</div>'
-        // 简易柱状图
-        +'<div style="display:flex;align-items:flex-end;gap:6px;height:60px;margin-bottom:8px;">'
-        +[{w:1,h:30,l:'W1'},{w:2,h:45,l:'W2'},{w:3,h:38,l:'W3'},{w:4,h:60,l:'W4'}].map(function(b){
-          return '<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;">'
-            +'<div style="width:100%;background:#00b894;border-radius:4px 4px 0 0;height:'+b.h+'px;"></div>'
-            +'<div style="font-size:10px;color:#999;">'+b.l+'</div>'
-            +'</div>';
-        }).join('')
-        +'</div>'
-        +'<div style="display:flex;gap:0;border-top:1px solid #f5f5f5;padding-top:10px;">'
-        +[{v:'¥12,680',l:'本月GMV'},{v:'85单',l:'总订单'},{v:'¥149',l:'客单价'},{v:'8.4%',l:'平均转化'}].map(function(d){
-          return '<div style="flex:1;text-align:center;"><div style="font-size:13px;font-weight:800;color:#00b894;">'+d.v+'</div><div style="font-size:10px;color:#bbb;margin-top:2px;">'+d.l+'</div></div>';
-        }).join('')
-        +'</div>'
-        +'</div>'
-      : '')
+    // ── 销售情况汇总（seller 已整合到订单管理中，此处不再重复） ──
+    +(role==='seller' ? '' : '')
 
     +(role==='kol'
       ? '<div style="padding:4px 16px 8px;font-size:15px;font-weight:700;">💰 商单收入汇总</div>'
