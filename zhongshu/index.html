@@ -3487,6 +3487,22 @@ function sendMessage(role, text) {
       refreshChat(role);
       return;
     }
+    // ── 无意义输入拦截（重复字符、纯符号、太短无商品指向） ──
+    var _cleaned = _t.replace(/[^\u4e00-\u9fa5a-z0-9]/g, ''); // 只保留中文+字母+数字
+    var _isNonsense = false;
+    // 纯重复字符：哈哈哈、啊啊啊、嘻嘻嘻
+    if (_cleaned.length >= 2 && /^(.)\1+$/.test(_cleaned)) _isNonsense = true;
+    // 重复双字：哈哈哈哈、呵呵呵呵
+    if (_cleaned.length >= 4 && /^(.{1,2})\1{1,}$/.test(_cleaned)) _isNonsense = true;
+    // 清理后为空（纯符号/表情）
+    if (_cleaned.length === 0 && text.trim().length > 0) _isNonsense = true;
+    // 太短且无商品指向（1个字）
+    if (_cleaned.length === 1 && !(/[\u4e00-\u9fa5]/.test(_cleaned))) _isNonsense = true;
+    if (_isNonsense) {
+      chatHistory[role].push({ from:'agent', text:'发个商品名或链接给我吧～' });
+      refreshChat(role);
+      return;
+    }
 
     // ── 流式模式：先出卡片骨架，逐字填入 ──
     var streamId = 'stream-' + Date.now();

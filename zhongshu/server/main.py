@@ -386,19 +386,27 @@ async def analyze_keyword(message: str) -> dict:
     - is_product=True: 输入是商品关键词，应该生成笔记
     - is_product=False: 输入不是商品，reply 中包含 ≤15字的引导话术
     """
-    prompt = f"""判断用户输入是否包含可以写小红书种草笔记的商品/产品/服务关键词。
+    prompt = f"""你是小红书种草笔记助手的意图判断器。判断用户输入是否包含「具体的、可以写种草笔记的商品/产品/品牌/服务」。
 
 用户输入：「{message}」
 
-判断标准：
-- 如果输入中提到了具体的商品、产品、品牌、服务（如"防晒霜""iPhone""瑜伽课"），或者描述了某类可推广的东西（如"平价好用的洗面奶""夏天穿的裙子"），判定为商品。
-- 如果输入只是闲聊、提问、指令、抽象概念（如"帮我写一个""你觉得呢""什么好用"），没有具体商品指向，判定为非商品。
+██ 判定为【商品】的条件（必须同时满足）：
+1. 输入中有明确的商品名、产品类型、品牌名、或具体服务名称
+2. 这个东西是可以在小红书上做种草推荐的
 
-只返回JSON，不要有其他文字：
+商品示例：防晒霜、iPhone、瑜伽课、平价洗面奶、夏天穿的裙子、戴森吹风机、星巴克新品
+
+██ 判定为【非商品】的条件（满足任一即可）：
+- 无意义文字：哈哈、嘻嘻、啊啊啊、表情符号、乱码、重复字符
+- 模糊指令：帮我写一个、来一篇、生成笔记、什么好用、推荐一下
+- 闲聊/提问：你好厉害、怎么用、可以吗、试试看、好的
+- 抽象概念：没有指向任何具体可购买/可体验的东西
+
+██ 核心原则：宁可多问一句，也不要对无意义输入生成笔记。如果拿不准，判定为非商品。
+
+只返回JSON：
 - 是商品：{{"is_product":true}}
-- 非商品：{{"is_product":false,"reply":"≤15字的引导话术"}}
-
-引导话术示例："告诉我商品名，帮你写笔记～""发个链接或商品名给我吧～"
+- 非商品：{{"is_product":false,"reply":"≤15字引导话术"}}
 """
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
@@ -411,7 +419,7 @@ async def analyze_keyword(message: str) -> dict:
                 json={
                     "model": MODEL,
                     "messages": [
-                        {"role": "system", "content": "你是意图分类器，只返回JSON。"},
+                        {"role": "system", "content": "你是意图分类器。只返回JSON，不要有任何其他文字。"},
                         {"role": "user", "content": prompt},
                     ],
                     "temperature": 0,
@@ -420,12 +428,17 @@ async def analyze_keyword(message: str) -> dict:
             )
             if resp.status_code == 200:
                 content = resp.json()["choices"][0]["message"]["content"].strip()
-                # 解析 JSON
-                data = json.loads(content)
+                # 尝试从 content 中提取 JSON（可能有 ```json 包裹）
+                json_str = content
+                if "```" in content:
+                    json_match = re.search(r'\{[^}]+\}', content)
+                    if json_match:
+                        json_str = json_match.group(0)
+                data = json.loads(json_str)
                 if data.get("is_product"):
                     return {"is_product": True, "reply": ""}
                 else:
-                    reply = data.get("reply", "发个商品链接或名称给我吧～")
+                    reply = data.get("reply", "发个商品名或链接给我吧～")
                     # 确保不超过15字
                     if len(reply) > 15:
                         reply = reply[:15]
@@ -433,8 +446,8 @@ async def analyze_keyword(message: str) -> dict:
     except Exception as e:
         print(f"[analyze_keyword] LLM 调用失败: {e}")
 
-    # 降级：默认当作商品处理（宁可生成也不要卡住用户）
-    return {"is_product": True, "reply": ""}
+    # 降级：默认当作非商品（宁可多问一句也不要乱生成）
+    return {"is_product": False, "reply": "发个商品名或链接给我吧～"}
 
 
 def extract_user_profile(message: str, profile: dict) -> dict:
