@@ -3508,6 +3508,7 @@ function sendMessage(role, text) {
     var streamText = '';
     var cardShown = false;
     var fallbackHandled = false;
+    var streamDone = false; // 防止 onDone 后 .catch 再次生成
     var _ue = function(s) { return s.replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\'); };
     // 清理 markdown/星号等格式符号，只保留纯文字+emoji
     var _stripFmt = function(s) { return s.replace(/\*{1,2}([^*]+)\*{1,2}/g, '$1').replace(/`{1,3}[^`]*`{1,3}/g, '').replace(/^#{1,6}\s*/gm, ''); };
@@ -3606,7 +3607,8 @@ function sendMessage(role, text) {
         if (area) area.scrollTop = area.scrollHeight;
       },
       onDone: function(data) {
-        if (fallbackHandled) return; // greeting/fallback 已处理，跳过
+        if (fallbackHandled || streamDone) return; // 已处理，跳过
+        streamDone = true;
         var fullText = data.full_text || streamText;
         var raw = fullText.trim();
 
@@ -3646,6 +3648,7 @@ function sendMessage(role, text) {
       onFallback: function(data) {
         // greeting / fallback: 直接显示纯文本，不生成笔记卡片
         fallbackHandled = true;
+        streamDone = true;
         var streamEl = document.getElementById(streamId);
         if (streamEl) streamEl.remove();
         chatHistory[role].push({ from: 'agent', text: data.text || data.message || '' });
@@ -3654,11 +3657,13 @@ function sendMessage(role, text) {
       onConfirmSaveDraft: function(data) {
         // 切换商品前询问是否保存当前草稿
         fallbackHandled = true;
+        streamDone = true;
         var streamEl = document.getElementById(streamId);
         if (streamEl) streamEl.remove();
         showSaveDraftConfirm(role, data.draft_note, data.pending_message);
       }
     }).catch(function(err){
+      if (streamDone || fallbackHandled) return; // 流已成功完成，忽略后续异常
       console.warn('[种薯] 流式调用失败，降级到非流式:', err);
       var streamEl = document.getElementById(streamId);
       if (streamEl) streamEl.remove();
